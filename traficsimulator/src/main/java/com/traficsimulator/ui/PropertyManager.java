@@ -7,6 +7,7 @@ import com.traficsimulator.road.LaneType;
 import com.traficsimulator.road.Road;
 import com.traficsimulator.road.traficlight.TraficLight;
 import com.traficsimulator.road.traficlight.TraficLightSignal;
+import com.traficsimulator.vehicle.VehicleType; // 정확하게 임포트! ❤️
 
 import javafx.collections.FXCollections;
 import javafx.fxml.FXMLLoader;
@@ -37,7 +38,7 @@ public class PropertyManager {
     private final JunctionController junctionController;
     private final SelectionManager selectionManager;
     private final RoadManager roadManager;
-    private final Map<TraficLight, Stage> openEditors = new HashMap<>(); // 에디터 창 관리 ❤️
+    private final Map<TraficLight, Stage> openEditors = new HashMap<>(); 
 
     public PropertyManager(GridPane grid, JunctionController jc, SelectionManager sm, RoadManager rm, Runnable onPropertyChanged) {
         this.grid = grid;
@@ -77,7 +78,6 @@ public class PropertyManager {
 
         addSeparator();
         
-        // --- 차선 등록 버튼 ---
         List<Lane> selectedLanes = selectionManager.getSelectedLanes();
         if (!selectedLanes.isEmpty()) {
             Button regBtn = new Button("Register " + selectedLanes.size() + " Selected Lanes");
@@ -104,7 +104,6 @@ public class PropertyManager {
             addSeparator();
         }
 
-        // --- 등록된 차선 리스트 ---
         addTitle("Registered Lanes");
         Set<Lane> registeredLanes = tl.getControlLaneList();
         if (registeredLanes != null && !registeredLanes.isEmpty()) {
@@ -128,7 +127,6 @@ public class PropertyManager {
 
         addSeparator();
         
-        // --- 1. 신호 종류 체크박스 복구! ❤️ ---
         addTitle("Available Signals");
         for (TraficLightSignal signal : TraficLightSignal.values()) {
             CheckBox signalCb = new CheckBox(signal.name());
@@ -143,7 +141,6 @@ public class PropertyManager {
 
         addSeparator();
         
-        // --- 2. 신호 주기 에디터 버튼 ---
         Button editCycleBtn = new Button("Edit Signal Cycle Details");
         editCycleBtn.setMaxWidth(Double.MAX_VALUE);
         editCycleBtn.setStyle("-fx-background-color: #9b59b6; -fx-text-fill: white; -fx-font-weight: bold;");
@@ -152,14 +149,13 @@ public class PropertyManager {
     }
 
     private void showSignalCycleEditor(TraficLight tl) {
-        // 객체 identity를 기준으로 중복 체크 수행 ❤️
         if (openEditors.containsKey(tl)) {
             Stage existingStage = openEditors.get(tl);
             if (existingStage.isShowing()) {
                 existingStage.toFront();
                 return;
             } else {
-                openEditors.remove(tl); // 닫혀있으면 제거 후 새로 생성
+                openEditors.remove(tl);
             }
         }
 
@@ -171,7 +167,7 @@ public class PropertyManager {
             controller.initData(tl, onPropertyChanged);
             
             Stage stage = new Stage();
-            stage.initModality(Modality.NONE); // Modeless
+            stage.initModality(Modality.NONE); 
             stage.setTitle("Cycle Editor - Light@" + Integer.toHexString(tl.hashCode()));
             stage.setScene(new Scene(root));
             
@@ -296,6 +292,33 @@ public class PropertyManager {
             else onPropertyChanged.run();
         });
         grid.add(dirCb, 0, grid.getRowCount(), 2, 1);
+
+        // --- 정지선 표시 설정 추가! ❤️ ---
+        CheckBox stopLineCb = new CheckBox("Show Stop Line");
+        stopLineCb.setSelected(lane.isDrawStopLine());
+        stopLineCb.setOnAction(e -> {
+            lane.setDrawStopLine(stopLineCb.isSelected());
+            onPropertyChanged.run();
+        });
+        grid.add(stopLineCb, 0, grid.getRowCount(), 2, 1);
+
+        addSeparator();
+        
+        // --- 허용 차량 종류 설정 (VehicleType) ❤️ ---
+        addTitle("Allowed Vehicles");
+        for (VehicleType vt : VehicleType.values()) {
+            CheckBox vtCb = new CheckBox(vt.name());
+            vtCb.setSelected(lane.getAllowVehicle().contains(vt)); 
+            vtCb.setOnAction(e -> {
+                if (vtCb.isSelected()) {
+                    lane.setAllowVehicle(vt);
+                } else {
+                    lane.removeAllowVehicle(vt);
+                }
+                onPropertyChanged.run();
+            });
+            grid.add(vtCb, 0, grid.getRowCount(), 2, 1);
+        }
         
         if (road != null) {
             addSeparator();

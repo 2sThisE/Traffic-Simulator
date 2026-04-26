@@ -1,5 +1,7 @@
 package com.traficsimulator.ui;
 
+import java.util.List;
+
 import com.traficsimulator.road.JunctionController;
 import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.LaneConnection;
@@ -87,11 +89,32 @@ public class KeyboardHandler {
         } 
         // 4. 도로 삭제
         else if (selectedRoad != null) {
+            // 도로 삭제 전, 해당 도로의 차선들을 관리하는 신호등 정리 ❤️
+            List<Lane> lanesToDelete = selectedRoad.getLaneList();
+            List<TraficLight> lightsToRemove = new java.util.ArrayList<>();
+
+            for (TraficLight tl : roadManager.getTraficLightList()) {
+                for (Lane lane : lanesToDelete) {
+                    tl.removeControlLane(lane);
+                }
+                // 관리할 차선이 하나도 없으면 삭제 대상으로 등록
+                if (tl.getControlLaneList().isEmpty()) {
+                    lightsToRemove.add(tl);
+                } else {
+                    tl.updatePositionToLanesCenter(); // 남은 차선이 있다면 위치 재계산
+                }
+            }
+            
+            // 신호등 일괄 삭제
+            for (TraficLight tl : lightsToRemove) {
+                roadManager.removeTraficLight(tl);
+            }
+
             for (Lane lane : selectedRoad.getLaneList()) {
                 junctionController.removeLaneConnections(lane);
             }
             roadManager.removeRoad(selectedRoad);
-            System.out.println("[KeyboardHandler] Deleted Road and all its connections.");
+            System.out.println("[KeyboardHandler] Deleted Road and its associated Traffic Lights.");
         }
 
         selectionManager.clearSelection();

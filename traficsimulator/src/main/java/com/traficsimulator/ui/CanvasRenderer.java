@@ -101,25 +101,21 @@ public class CanvasRenderer {
             Set<TraficLightSignal> availableSignals = tl.getLightList();
             if (availableSignals.isEmpty()) continue;
 
-            // 1. 신호등 디자인 설정 (월드 좌표 기준 - 확대/축소 적용됨) ❤️
             int signalCount = availableSignals.size();
-            double lampSize = 15.0;   // 고정 월드 크기
-            double padding = 4.0;    // 고정 월드 패딩
+            double lampSize = 15.0;   
+            double padding = 4.0;    
             double width = lampSize + padding * 2;
             double height = (lampSize + padding) * signalCount + padding;
 
-            // 선택 하이라이트
             if (sm.getSelectedTraficLight() == tl) {
                 gc.setStroke(Color.CYAN);
-                gc.setLineWidth(2.0 / zoom); // 선 굵기만 픽셀 기준 보정
+                gc.setLineWidth(2.0 / zoom);
                 gc.strokeRect(pos.x - width/2 - 2/zoom, pos.y - height/2 - 2/zoom, width + 4/zoom, height + 4/zoom);
             }
 
-            // 신호등 본체
             gc.setFill(Color.rgb(30, 30, 30));
             gc.fillRoundRect(pos.x - width/2, pos.y - height/2, width, height, 3, 3);
 
-            // 2. 개별 램프 그리기 (현재 신호 상태 반영)
             TraficLightSignal[] currentActive = tl.currentSignal();
             List<TraficLightSignal> activeList = java.util.Arrays.asList(currentActive);
 
@@ -138,11 +134,11 @@ public class CanvasRenderer {
                     case STRAIGHT -> Color.LIME;
                     case LEFT -> Color.AQUA;
                     case RIGHT -> Color.GREENYELLOW;
+                    case U_TURN -> Color.MAGENTA;
                 };
 
                 if (isOn) {
                     gc.setFill(baseColor);
-                    // 글로우 효과 (반투명 원 중첩) ❤️
                     gc.setGlobalAlpha(0.3);
                     gc.fillOval(pos.x - lampSize/2 - 2, lampY - 2, lampSize + 4, lampSize + 4);
                     gc.setGlobalAlpha(1.0);
@@ -150,9 +146,12 @@ public class CanvasRenderer {
                     gc.setFill(baseColor.deriveColor(0, 1, 0.2, 1.0));
                 }
 
-                // 일반 신호는 원형, 좌/우회전은 화살표로! ❤️
-                if (sig == TraficLightSignal.LEFT || sig == TraficLightSignal.RIGHT) {
-                    drawArrowSignal(gc, pos.x, lampY + lampSize/2, lampSize, sig == TraficLightSignal.LEFT);
+                if (sig == TraficLightSignal.LEFT || sig == TraficLightSignal.RIGHT || sig == TraficLightSignal.U_TURN) {
+                    if (sig == TraficLightSignal.U_TURN) {
+                        drawUTurnSignal(gc, pos.x, lampY + lampSize/2, lampSize);
+                    } else {
+                        drawArrowSignal(gc, pos.x, lampY + lampSize/2, lampSize, sig == TraficLightSignal.LEFT);
+                    }
                 } else {
                     gc.fillOval(pos.x - lampSize/2, lampY, lampSize, lampSize);
                 }
@@ -160,23 +159,30 @@ public class CanvasRenderer {
         }
     }
 
-    /**
-     * 신호등 내부에 화살표 신호를 그립니다. ❤️
-     */
+    private void drawUTurnSignal(GraphicsContext gc, double cx, double cy, double size) {
+        double r = size * 0.4;
+        gc.save();
+        gc.setLineWidth(1.5);
+        gc.setStroke(gc.getFill());
+        gc.strokeArc(cx - r, cy - r/2, r * 1.5, r, 0, 180, javafx.scene.shape.ArcType.OPEN);
+        gc.strokeLine(cx - r, cy, cx - r, cy + r/2);
+        gc.strokeLine(cx + r * 0.5, cy, cx + r * 0.5, cy + r/2);
+        double headX = cx - r;
+        double headY = cy + r/2;
+        gc.strokeLine(headX, headY, headX - 2, headY - 3);
+        gc.strokeLine(headX, headY, headX + 2, headY - 3);
+        gc.restore();
+    }
+
     private void drawArrowSignal(GraphicsContext gc, double cx, double cy, double size, boolean isLeft) {
         double r = size / 2;
         double direction = isLeft ? -1 : 1;
-        
         gc.save();
         gc.setLineWidth(1.5);
-        gc.setStroke(gc.getFill()); // 현재 fill 색상을 stroke로 사용
-        
-        // 화살표 몸통
+        gc.setStroke(gc.getFill()); 
         gc.strokeLine(cx - r * 0.5 * direction, cy, cx + r * 0.5 * direction, cy);
-        // 화살표 머리
         gc.strokeLine(cx + r * 0.5 * direction, cy, cx + r * 0.1 * direction, cy - r * 0.4);
         gc.strokeLine(cx + r * 0.5 * direction, cy, cx + r * 0.1 * direction, cy + r * 0.4);
-        
         gc.restore();
     }
 
@@ -319,7 +325,47 @@ public class CanvasRenderer {
             }
             strokePath(gc, boundaryPath);
         }
+        
+        drawStopLines(gc, lanes, laneWidth, zoom); // 정지선 그리기 ❤️
         drawLaneArrows(gc, lanes);
+    }
+
+    private void drawStopLines(GraphicsContext gc, List<Lane> lanes, double laneWidth, double zoom) {
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(3.0); // 도로 선들과 어울리도록 3.0으로 조정 ❤️
+        gc.setLineCap(StrokeLineCap.BUTT);
+        gc.setLineDashes(0);
+
+        for (Lane lane : lanes) {
+            // 자기가 만든 속성 드디어 연결! ❤️
+            if (!lane.isDrawStopLine()) continue;
+
+            List<Point2D.Double> path = lane.getLanePath();
+            if (path.size() < 2) continue;
+
+            Point2D.Double p1, p2;
+            if (lane.isRoadDirection()) {
+                p1 = path.get(path.size() - 2);
+                p2 = path.get(path.size() - 1);
+            } else {
+                p1 = path.get(1);
+                p2 = path.get(0);
+            }
+
+            double dx = p2.x - p1.x;
+            double dy = p2.y - p1.y;
+            double len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 1e-6) continue;
+
+            double nx = -dy / len;
+            double ny = dx / len;
+
+            double halfWidth = laneWidth / 2.0;
+            gc.strokeLine(
+                p2.x - nx * halfWidth, p2.y - ny * halfWidth,
+                p2.x + nx * halfWidth, p2.y + ny * halfWidth
+            );
+        }
     }
 
     private void drawLaneArrows(GraphicsContext gc, List<Lane> lanes) {

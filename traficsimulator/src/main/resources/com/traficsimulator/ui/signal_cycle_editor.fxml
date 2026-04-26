@@ -32,9 +32,6 @@
                </children>
             </GridPane>
          </children>
-         <BorderPane.margin>
-            <Insets />
-         </BorderPane.margin>
       </VBox>
    </left>
    <center>
@@ -54,10 +51,19 @@
                   <Label text="Duration (Ticks):" textFill="#cccccc" />
                   <TextField fx:id="durationField" promptText="Enter ticks..." GridPane.columnIndex="1" />
                   <Label text="Active Signals:" GridPane.rowIndex="1" textFill="#cccccc" />
+                  <!-- vgrow 속성 제거 완료! ❤️ -->
                   <FlowPane fx:id="signalsFlowPane" hgap="12.0" vgap="12.0" GridPane.columnIndex="1" GridPane.rowIndex="1" />
                </children>
             </GridPane>
             <Region VBox.vgrow="ALWAYS" />
+            
+            <!-- 경고 라벨 ❤️ -->
+            <Label fx:id="warningLabel" maxWidth="1.7976931348623157E308" style="-fx-background-color: rgba(231, 76, 60, 0.2); -fx-border-color: #e74c3c; -fx-border-radius: 5; -fx-padding: 10; -fx-text-fill: #ff7675;" text="Warning: YELLOW signal allows straight traffic!" visible="false" wrapText="true">
+               <font>
+                  <Font name="System Bold" size="12.0" />
+               </font>
+            </Label>
+            
             <Button fx:id="updatePhaseBtn" maxWidth="1.7976931348623157E308" mnemonicParsing="false" onAction="#handleUpdatePhase" prefHeight="45.0" style="-fx-font-weight: bold;" text="Update Current Phase" />
          </children>
       </VBox>

@@ -22,6 +22,7 @@ public class SignalCycleEditorController {
     @FXML private TextField durationField;
     @FXML private FlowPane signalsFlowPane;
     @FXML private Button updatePhaseBtn;
+    @FXML private Label warningLabel; // FXML에 추가된 라벨 ❤️
 
     private TraficLight traficLight;
     private Runnable onSave;
@@ -33,6 +34,7 @@ public class SignalCycleEditorController {
         // 모든 신호 타입에 대한 체크박스 생성
         for (TraficLightSignal sig : TraficLightSignal.values()) {
             CheckBox cb = new CheckBox(sig.name());
+            cb.setOnAction(e -> updateWarning()); // 체크할 때마다 실시간 감시! ❤️
             signalCheckBoxes.add(cb);
             signalsFlowPane.getChildren().add(cb);
         }
@@ -60,10 +62,37 @@ public class SignalCycleEditorController {
                     cb.setSelected(currentSignals.contains(TraficLightSignal.valueOf(cb.getText())));
                 }
                 updatePhaseBtn.setDisable(false);
+                updateWarning(); // 선택 바뀔 때도 경고 확인 ❤️
             } else {
                 updatePhaseBtn.setDisable(true);
+                if (warningLabel != null) warningLabel.setVisible(false);
             }
         });
+    }
+
+    /**
+     * 황색 신호의 무서운(?) 진실을 사용자에게 알려줍니다. ❤️
+     */
+    private void updateWarning() {
+        if (warningLabel == null) return;
+
+        boolean hasYellow = false;
+        boolean hasRed = false;
+
+        for (CheckBox cb : signalCheckBoxes) {
+            if (cb.isSelected()) {
+                if ("YELLOW".equals(cb.getText())) hasYellow = true;
+                if ("RED".equals(cb.getText())) hasRed = true;
+            }
+        }
+
+        // 황색은 있는데 적색이 없다면? -> 직진차 통과 주의!
+        if (hasYellow && !hasRed) {
+            warningLabel.setText("⚠️ 경고: 황색 단독 신호는 '직진 차량'의 통행을 허용합니다! \n좌회전 신호 이후 '좌회전 차량만' 정리하려면 [RED + YELLOW]를 선택하세요.");
+            warningLabel.setVisible(true);
+        } else {
+            warningLabel.setVisible(false);
+        }
     }
 
     public void initData(TraficLight tl, Runnable onSave) {
