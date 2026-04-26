@@ -4,6 +4,7 @@
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
 <?import javafx.scene.text.Font?>
+<?import javafx.geometry.Insets?>
 <?import java.net.URL?>
 <?import javafx.scene.image.ImageView?>
 
@@ -39,7 +40,7 @@
             <ToolBar prefHeight="40.0" prefWidth="200.0" style="-fx-background-color: #252526; -fx-border-color: #3e3e3e; -fx-border-width: 0 0 1 0;">
               <items>
                 <Button fx:id="startBtn" mnemonicParsing="false" onAction="#handleStartSimulation" styleClass="btn-primary" text="▶ Start Simulation" />
-                <Button fx:id="stopBtn" mnemonicParsing="false" onAction="#handleStopSimulation" styleClass="btn-danger" text="■ Stop &amp; Reset" />
+                <Button fx:id="stopBtn" disable="true" mnemonicParsing="false" onAction="#handleStopSimulation" styleClass="btn-danger" text="■ Stop &amp; Reset" />
                   <Separator orientation="VERTICAL" />
                   <Label fx:id="statusLabel" text="Editor Mode" textFill="#888888">
                      <padding>

@@ -12,7 +12,19 @@ public class TraficLight {
     private int currentSignalIndex = 0;
     private int nextPhaseTick = 0;
     private Point2D.Double coordinates;
-    private Set<TraficLightSignal> lightList=new HashSet<>();
+    private Set<TraficLightSignal> lightList = new HashSet<>(Arrays.asList(
+        TraficLightSignal.RED, TraficLightSignal.YELLOW, TraficLightSignal.STRAIGHT
+    ));
+
+    /**
+     * 기본 생성자: 생성 즉시 빨간불 신호를 활성화합니다. ❤️
+     */
+    public TraficLight() {
+        // 처음부터 빨간불 신호 루프 하나는 넣어줌 (화면에 보이기 위해!)
+        List<SignalSetting> defaultLoop = new ArrayList<>();
+        defaultLoop.add(new SignalSetting(new TraficLightSignal[]{TraficLightSignal.RED}, 10));
+        addSignalLoop(defaultLoop);
+    }
 
 
     public void setCoordinates(Point2D.Double coordinates){this.coordinates=coordinates;}
@@ -23,7 +35,7 @@ public class TraficLight {
     
     public Set<Lane> getControlLaneList() { return controlLaneList; }
     public void removeControlLane(Lane lane) { controlLaneList.remove(lane); }
-    public List<SignalSetting> getSignalTime() { return signalTime; } // 자기를 위해 열어둘게 ❤️
+    public List<SignalSetting> getSignalTime() { return signalTime; } 
 
     /**
      * 등록된 모든 차선의 정지선(나가는 방향) 중앙값으로 신호등의 위치를 업데이트합니다.
@@ -37,7 +49,6 @@ public class TraficLight {
         for (Lane lane : controlLaneList) {
             List<Point2D.Double> path = lane.getLanePath();
             if (path != null && !path.isEmpty()) {
-                // 반전 처리: 상행(true)이면 끝점, 하행(false)이면 시작점이 나가는 방향! ❤️
                 Point2D.Double exitPt = lane.isRoadDirection() ? path.get(path.size() - 1) : path.get(0);
                 sumX += exitPt.x;
                 sumY += exitPt.y;
@@ -92,15 +103,15 @@ public class TraficLight {
         signalTime = new ArrayList<>();
         totalTick = 0;
         currentTick = 0;
-        currentSignalIndex = 0; // 커서 인덱스 리셋
-        nextPhaseTick = 0;      // 다음 페이즈 틱 리셋
+        currentSignalIndex = 0; 
+        nextPhaseTick = 0;      
     }
 
     /**
      * 다음 틱으로 넘어갑니다.
      */
     public void nextTick() {
-        if (totalTick <= 0) return; // 0으로 나누기 방지
+        if (totalTick <= 0) return; 
 
         currentTick = (currentTick + 1) % totalTick;
 
@@ -126,7 +137,6 @@ public class TraficLight {
         if (totalTick <= 0) return;
         currentTick = (currentTick + tick) % totalTick;
         
-        // 점프 후에는 현재 틱에 맞는 인덱스와 다음 타겟 틱을 반드시 재계산해야 함
         syncCursor();
     }
     /**
@@ -149,12 +159,22 @@ public class TraficLight {
         return controlLaneList.contains(lane);
     }
 
-    public void resetCurrentTick(){this.currentTick=0;}
+    /**
+     * 신호등의 모든 진행 상태를 초기화하여 첫 번째 페이즈부터 다시 시작하게 합니다.
+     */
+    public void resetCurrentTick() {
+        this.currentTick = 0;
+        this.currentSignalIndex = 0;
+        if (signalTime != null && !signalTime.isEmpty()) {
+            this.nextPhaseTick = signalTime.get(0).tick();
+        } else {
+            this.nextPhaseTick = 0;
+        }
+    }
 
     private void recalculateTotalTick() {
         this.totalTick = signalTime.stream().mapToInt(SignalSetting::tick).sum();
         if (totalTick > 0) {
-            // 현재 틱이 새로운 전체 틱 범위를 벗어나지 않도록 보정 ❤️
             this.currentTick %= totalTick;
             syncCursor();
         } else {

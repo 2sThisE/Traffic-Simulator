@@ -7,12 +7,15 @@ import com.traficsimulator.road.traficlight.TraficLight;
 
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
+import javafx.geometry.Insets;
 
 import java.awt.geom.Point2D;
 
@@ -31,11 +34,22 @@ public class SimulatorController {
     @FXML
     private GridPane propertyGrid;
 
+    @FXML
+    private Button startBtn;
+    @FXML
+    private Button stopBtn;
+    @FXML
+    private Label statusLabel;
+    @FXML
+    private Label tickLabel;
+
     private CanvasRenderer renderer;
     private RoadManager roadManager;
     private SelectionManager selectionManager;
     private PropertyManager propertyManager;
     private JunctionController junctionController;
+    private com.traficsimulator.road.traficlight.TraficLightController traficLightController;
+    private com.traficsimulator.util.GlobalTimer globalTimer;
     private RoadDrawingTool drawingTool;
     private RoadMoveTool moveTool;
     private RoadEditTool editTool;
@@ -43,6 +57,7 @@ public class SimulatorController {
     private KeyboardHandler keyboardHandler;
     private CanvasTransformHandler transformHandler;
 
+    private boolean isSimulationRunning = false; 
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
@@ -53,16 +68,27 @@ public class SimulatorController {
         roadManager = new RoadManager();
         selectionManager = new SelectionManager();
         junctionController = new JunctionController();
+        traficLightController = new com.traficsimulator.road.traficlight.TraficLightController();
+        
+        globalTimer = new com.traficsimulator.util.GlobalTimer(1.0);
+        globalTimer.addTickListener(traficLightController);
+        globalTimer.addTickListener(() -> {
+            javafx.application.Platform.runLater(() -> {
+                tickLabel.setText("Ticks: " + globalTimer.getTotalTicks());
+                requestRender();
+            });
+        });
+
         renderer = new CanvasRenderer(mainCanvas);
         drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
         
         moveTool = new RoadMoveTool(() -> {
-            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
+            roadManager.refreshTrafficLightPositions();
             refreshAllConnections();
             requestRender();
         });
         editTool = new RoadEditTool(() -> {
-            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
+            roadManager.refreshTrafficLightPositions();
             refreshAllConnections();
             requestRender();
         });
@@ -70,7 +96,7 @@ public class SimulatorController {
         modeManager = new EditorModeManager(componentTreeView);
         keyboardHandler = new KeyboardHandler(modeManager, drawingTool, roadManager, selectionManager, junctionController, this::requestRender);
         propertyManager = new PropertyManager(propertyGrid, junctionController, selectionManager, roadManager, () -> {
-            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
+            roadManager.refreshTrafficLightPositions();
             refreshAllConnections();
             requestRender();
         });
@@ -92,6 +118,43 @@ public class SimulatorController {
         }
 
         requestRender(); 
+    }
+
+    @FXML
+    private void handleStartSimulation() {
+        if (isSimulationRunning) return;
+        selectionManager.clearSelection();
+        isSimulationRunning = true;
+        startBtn.setDisable(true);
+        stopBtn.setDisable(false);
+        statusLabel.setText("Simulation Running... (Editing Locked)");
+        statusLabel.setStyle("-fx-text-fill: #2ecc71;");
+        
+        traficLightController.getTraficLights().clear();
+        for (TraficLight tl : roadManager.getTraficLightList()) {
+            tl.resetCurrentTick();
+            traficLightController.addTraficLight(tl);
+        }
+        globalTimer.start();
+        requestRender();
+    }
+
+    @FXML
+    private void handleStopSimulation() {
+        if (!isSimulationRunning) return;
+        isSimulationRunning = false;
+        startBtn.setDisable(false);
+        stopBtn.setDisable(true);
+        statusLabel.setText("Editor Mode");
+        statusLabel.setStyle("-fx-text-fill: #888888;");
+        
+        globalTimer.stop();
+        globalTimer.reset();
+        for (TraficLight tl : roadManager.getTraficLightList()) {
+            tl.resetCurrentTick();
+        }
+        tickLabel.setText("Ticks: 0");
+        requestRender();
     }
 
     private void refreshAllConnections() {
@@ -120,14 +183,13 @@ public class SimulatorController {
 
     private void setupCanvasEvents() {
         mainCanvas.setOnMouseMoved(e -> {
+            if (isSimulationRunning) return;
             if (modeManager.getMode() == EditorMode.SELECT) {
                 Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
                 RoadManager.PointHit hit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
-                
                 if (hit != null && hit.road != selectionManager.getSelectedRoad()) {
                     hit = null;
                 }
-
                 if (hit != hoveredPoint) {
                     hoveredPoint = hit;
                     requestRender();
@@ -137,11 +199,13 @@ public class SimulatorController {
 
         mainCanvas.setOnMousePressed(e -> {
             mainCanvas.requestFocus();
+            if (isSimulationRunning) {
+                transformHandler.handleMousePressed(e);
+                return;
+            }
             Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
-
             if (e.getButton() == MouseButton.PRIMARY) {
                 boolean shiftDown = e.isShiftDown();
-
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMousePressed(e, "Road", cameraX, cameraY, zoomFactor);
                 } else if (modeManager.getMode() == EditorMode.ADD_TRAFFIC_LIGHT) {
@@ -153,25 +217,26 @@ public class SimulatorController {
                         tl.updatePositionToLanesCenter();
                         roadManager.addTraficLight(tl);
                         selectionManager.selectTraficLight(tl);
-                        modeManager.setMode(EditorMode.SELECT); // 배치 후 선택 모드로 ❤️
+                        modeManager.setMode(EditorMode.SELECT); 
                     }
                 } else {
-                    // 신호등 히트 테스트 우선! ❤️
-                    TraficLight tlHit = roadManager.findTraficLightHit(worldPt, 15.0 / zoomFactor);
-                    if (tlHit != null) {
-                        selectionManager.selectTraficLight(tlHit);
+                    // 1. 도로 수정 포인트 우선 체크 ❤️
+                    RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
+                    if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
+                        editTool.startEditing(pointHit.road, pointHit.type);
                     } else {
-                        RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
-                        if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
-                            editTool.startEditing(pointHit.road, pointHit.type);
+                        // 2. 신호등 체크 ❤️
+                        TraficLight tlHit = roadManager.findTraficLightHit(worldPt, 15.0 / zoomFactor);
+                        if (tlHit != null) {
+                            selectionManager.selectTraficLight(tlHit);
                         } else {
+                            // 3. 마지막으로 도로/차선 체크 ❤️
                             RoadManager.HitResult hit = roadManager.findHit(worldPt);
                             if (hit.road != null) {
                                 if (shiftDown) {
                                     if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
                                 } else {
                                     Road currentlySelectedRoad = selectionManager.getSelectedRoad();
-                                    
                                     if (currentlySelectedRoad == hit.road) {
                                         if (e.getClickCount() == 2) {
                                             if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
@@ -184,7 +249,6 @@ public class SimulatorController {
                                             if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
                                             else selectionManager.selectRoad(hit.road);
                                         }
-                                        
                                         if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) {
                                             moveTool.startMoving(hit.road, worldPt);
                                         }
@@ -202,8 +266,11 @@ public class SimulatorController {
         });
 
         mainCanvas.setOnMouseDragged(e -> {
+            if (isSimulationRunning) {
+                transformHandler.handleMouseDragged(e);
+                return;
+            }
             Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
-            
             if (e.getButton() == MouseButton.PRIMARY) {
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMouseDragged(e, cameraX, cameraY, zoomFactor);
@@ -217,6 +284,7 @@ public class SimulatorController {
         });
 
         mainCanvas.setOnMouseReleased(e -> {
+            if (isSimulationRunning) return;
             if (e.getButton() == MouseButton.PRIMARY) {
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMouseReleased(e, cameraX, cameraY, zoomFactor);

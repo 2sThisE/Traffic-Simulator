@@ -32,6 +32,13 @@ public class GlobalTimer {
     }
 
     /**
+     * 진행된 모든 틱을 0으로 초기화합니다. ❤️
+     */
+    public void reset() {
+        totalTicks = 0;
+    }
+
+    /**
      * 수동으로 틱을 발생시킵니다. (주로 테스트용으로 사용됩니다.)
      */
     public void manualTick() {
