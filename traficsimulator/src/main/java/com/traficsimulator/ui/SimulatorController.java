@@ -4,6 +4,7 @@ import com.traficsimulator.road.JunctionController;
 import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.Road;
 import com.traficsimulator.road.traficlight.TraficLight;
+import com.traficsimulator.road.camera.Camera; // 추가 ❤️
 
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
@@ -16,32 +17,23 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
 import javafx.geometry.Insets;
+import javafx.scene.input.MouseEvent;
 
 import java.awt.geom.Point2D;
 
 public class SimulatorController {
 
-    @FXML
-    private BorderPane rootPane;
-    @FXML
-    private TreeView<String> componentTreeView;
-    @FXML
-    private Pane centerContainer;
-    @FXML
-    private Pane canvasContainer;
-    @FXML
-    private Canvas mainCanvas;
-    @FXML
-    private GridPane propertyGrid;
+    @FXML private BorderPane rootPane;
+    @FXML private TreeView<String> componentTreeView;
+    @FXML private Pane centerContainer;
+    @FXML private Pane canvasContainer;
+    @FXML private Canvas mainCanvas;
+    @FXML private GridPane propertyGrid;
 
-    @FXML
-    private Button startBtn;
-    @FXML
-    private Button stopBtn;
-    @FXML
-    private Label statusLabel;
-    @FXML
-    private Label tickLabel;
+    @FXML private Button startBtn;
+    @FXML private Button stopBtn;
+    @FXML private Label statusLabel;
+    @FXML private Label tickLabel;
 
     private CanvasRenderer renderer;
     private RoadManager roadManager;
@@ -58,6 +50,7 @@ public class SimulatorController {
     private CanvasTransformHandler transformHandler;
 
     private boolean isSimulationRunning = false; 
+    private boolean isDraggingObject = false; // 신호등/카메라 드래그용 ❤️
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
@@ -83,12 +76,12 @@ public class SimulatorController {
         drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
         
         moveTool = new RoadMoveTool(() -> {
-            roadManager.refreshTrafficLightPositions();
+            roadManager.refreshStaticObjectPositions();
             refreshAllConnections();
             requestRender();
         });
         editTool = new RoadEditTool(() -> {
-            roadManager.refreshTrafficLightPositions();
+            roadManager.refreshStaticObjectPositions();
             refreshAllConnections();
             requestRender();
         });
@@ -96,7 +89,7 @@ public class SimulatorController {
         modeManager = new EditorModeManager(componentTreeView);
         keyboardHandler = new KeyboardHandler(modeManager, drawingTool, roadManager, selectionManager, junctionController, this::requestRender);
         propertyManager = new PropertyManager(propertyGrid, junctionController, selectionManager, roadManager, () -> {
-            roadManager.refreshTrafficLightPositions();
+            roadManager.refreshStaticObjectPositions();
             refreshAllConnections();
             requestRender();
         });
@@ -177,6 +170,7 @@ public class SimulatorController {
         root.setExpanded(true);
         root.getChildren().add(new TreeItem<>("Road"));
         root.getChildren().add(new TreeItem<>("Traffic Light"));
+        root.getChildren().add(new TreeItem<>("Camera")); // 추가 ❤️
         componentTreeView.setRoot(root);
         componentTreeView.setShowRoot(false);
     }
@@ -219,43 +213,51 @@ public class SimulatorController {
                         selectionManager.selectTraficLight(tl);
                         modeManager.setMode(EditorMode.SELECT); 
                     }
+                } else if (modeManager.getMode() == EditorMode.ADD_CAMERA) { // 카메라 추가 ❤️
+                    RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                    if (hit.lane != null) {
+                        Camera cam = new Camera(hit.road, worldPt, hit.lane);
+                        roadManager.addCamera(cam);
+                        selectionManager.selectCamera(cam);
+                        modeManager.setMode(EditorMode.SELECT);
+                    }
                 } else {
-                    // 1. 도로 수정 포인트 우선 체크 ❤️
+                    // 1. 포인트 핸들
                     RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
                     if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
                         editTool.startEditing(pointHit.road, pointHit.type);
                     } else {
-                        // 2. 신호등 체크 ❤️
+                        // 2. 신호등 체크
                         TraficLight tlHit = roadManager.findTraficLightHit(worldPt, 15.0 / zoomFactor);
                         if (tlHit != null) {
                             selectionManager.selectTraficLight(tlHit);
+                            isDraggingObject = true;
                         } else {
-                            // 3. 마지막으로 도로/차선 체크 ❤️
-                            RoadManager.HitResult hit = roadManager.findHit(worldPt);
-                            if (hit.road != null) {
-                                if (shiftDown) {
-                                    if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
-                                } else {
-                                    Road currentlySelectedRoad = selectionManager.getSelectedRoad();
-                                    if (currentlySelectedRoad == hit.road) {
-                                        if (e.getClickCount() == 2) {
-                                            if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
-                                        }
-                                        if (!hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
+                            // 3. 카메라 체크 ❤️
+                            Camera camHit = roadManager.findCameraHit(worldPt, 15.0 / zoomFactor);
+                            if (camHit != null) {
+                                selectionManager.selectCamera(camHit);
+                                isDraggingObject = true;
+                            } else {
+                                // 4. 도로/차선
+                                RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                                if (hit.road != null) {
+                                    if (shiftDown) {
+                                        if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
                                     } else {
-                                        if (e.getClickCount() == 2) {
-                                            selectionManager.selectRoad(hit.road);
+                                        if (selectionManager.getSelectedRoad() == hit.road) {
+                                            if (e.getClickCount() == 2 && hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
+                                            if (!hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
                                         } else {
-                                            if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
+                                            if (e.getClickCount() == 2) selectionManager.selectRoad(hit.road);
+                                            else if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
                                             else selectionManager.selectRoad(hit.road);
-                                        }
-                                        if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) {
-                                            moveTool.startMoving(hit.road, worldPt);
+                                            if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
                                         }
                                     }
+                                } else {
+                                    if (!shiftDown) selectionManager.clearSelection();
                                 }
-                            } else {
-                                if (!shiftDown) selectionManager.clearSelection();
                             }
                         }
                     }
@@ -276,11 +278,22 @@ public class SimulatorController {
                     drawingTool.handleMouseDragged(e, cameraX, cameraY, zoomFactor);
                 } else if (editTool.isEditing()) {
                     editTool.handleMouseDragged(worldPt);
+                    roadManager.refreshStaticObjectPositions();
                 } else if (moveTool.isMoving()) {
                     moveTool.handleMouseDragged(worldPt);
+                    roadManager.refreshStaticObjectPositions();
+                } else if (isDraggingObject) {
+                    if (selectionManager.getSelectedTraficLight() != null) {
+                        selectionManager.getSelectedTraficLight().setCoordinates(worldPt);
+                    } else if (selectionManager.getSelectedCamera() != null) {
+                        // 자석처럼 도로 위 스냅! ❤️
+                        Point2D.Double snapped = roadManager.findNearestPointOnAnyRoad(worldPt);
+                        selectionManager.getSelectedCamera().setLoc(snapped);
+                    }
                 }
             }
             transformHandler.handleMouseDragged(e);
+            requestRender();
         });
 
         mainCanvas.setOnMouseReleased(e -> {
@@ -291,7 +304,9 @@ public class SimulatorController {
                 }
                 editTool.stopEditing();
                 moveTool.stopMoving();
+                isDraggingObject = false;
             }
+            requestRender();
         });
     }
 
@@ -299,6 +314,7 @@ public class SimulatorController {
         renderer.render(
             roadManager.getRoadList(),
             roadManager.getTraficLightList(),
+            roadManager.getCameraList(), // 카메라 추가 ❤️
             drawingTool.getDragStart(),
             drawingTool.getCurrentMouse(),
             drawingTool.isDrawing(),

@@ -19,6 +19,8 @@ public class EditorModeManager {
                     setMode(EditorMode.DRAW_ROAD);
                 } else if ("Traffic Light".equals(value)) {
                     setMode(EditorMode.ADD_TRAFFIC_LIGHT);
+                } else if ("Camera".equals(value)) { // 카메라 모드 추가 ❤️
+                    setMode(EditorMode.ADD_CAMERA);
                 } else {
                     setMode(EditorMode.SELECT);
                 }
@@ -27,14 +29,19 @@ public class EditorModeManager {
     }
 
     public void setMode(EditorMode mode) {
-        if (currentMode.get() == mode) return; // 같은 모드면 무시 ❤️
+        if (currentMode.get() == mode) return; 
         
         currentMode.set(mode);
         
-        // SELECT 모드로 바뀔 때만 선택 해제하되, 이미 해제된 상태면 무시
-        if (mode == EditorMode.SELECT && !treeView.getSelectionModel().isEmpty()) {
-            // JavaFX 스레드 충돌 방지를 위해 체크 후 해제
-            treeView.getSelectionModel().clearSelection();
+        // SELECT 모드로 바뀔 때만 선택 해제
+        // JavaFX 내부 버그(IndexOutOfBounds) 방지를 위해 
+        // 선택이 실제 있는 경우에만 안전하게 해제 ❤️
+        if (mode == EditorMode.SELECT) {
+            javafx.application.Platform.runLater(() -> {
+                if (!treeView.getSelectionModel().isEmpty()) {
+                    treeView.getSelectionModel().clearSelection();
+                }
+            });
         }
     }
 

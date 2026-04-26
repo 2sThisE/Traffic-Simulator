@@ -4,6 +4,7 @@ import com.traficsimulator.road.JunctionController;
 import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.LaneConnection;
 import com.traficsimulator.road.Road;
+import com.traficsimulator.road.camera.Camera;
 import com.traficsimulator.road.traficlight.TraficLight;
 import com.traficsimulator.road.traficlight.TraficLightSignal;
 
@@ -15,6 +16,7 @@ import javafx.scene.shape.StrokeLineCap;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class CanvasRenderer {
@@ -24,7 +26,7 @@ public class CanvasRenderer {
         this.canvas = canvas;
     }
 
-    public void render(List<Road> roads, List<TraficLight> traficLights,
+    public void render(List<Road> roads, List<TraficLight> traficLights, List<Camera> cameras,
                        Point2D.Double dragStart, Point2D.Double currentMouse, boolean isDrawing,
                        double cameraX, double cameraY, double zoom, SelectionManager selectionManager,
                        RoadManager.PointHit hoveredPoint, JunctionController junctionController) {
@@ -44,9 +46,10 @@ public class CanvasRenderer {
         // 2. 교차로 연결부 그리기
         drawJunctionConnections(gc, roads, junctionController, selectionManager, zoom);
 
-        // 3. 신호등 및 연결된 차선 그리기
+        // 3. 정적 객체들 그리기 ❤️
         drawRegisteredLanesHighlight(gc, roads, selectionManager, zoom);
         drawTraficLights(gc, traficLights, selectionManager, zoom);
+        drawCameras(gc, cameras, selectionManager, zoom); // 카메라 그리기 추가! ❤️
 
         // 4. 포인트 조절 핸들 그리기
         drawHandles(gc, roads, selectionManager, hoveredPoint, zoom);
@@ -60,6 +63,102 @@ public class CanvasRenderer {
         }
 
         gc.restore();
+    }
+
+    /**
+     * 단속 카메라와 단속 지점을 그립니다. ❤️
+     */
+    private void drawCameras(GraphicsContext gc, List<Camera> cameras, 
+                             SelectionManager sm, double zoom) {
+        if (cameras == null) return;
+
+        for (Camera cam : cameras) {
+            Point2D.Double pos = cam.getLoc();
+            if (pos == null) continue;
+
+            // 1. 감시 차선별 단속 지점(선) 그리기 ❤️
+            gc.setLineWidth(4.0);
+            gc.setStroke(Color.rgb(255, 100, 100, 0.6)); // 약간 투명한 빨간색
+            for (Map.Entry<Lane, Point2D.Double> entry : cam.getTargetLaneMap().entrySet()) {
+                Lane lane = entry.getKey();
+                Point2D.Double snapPt = entry.getValue();
+                
+                // 해당 차선 위의 단속선 긋기 (법선 벡터 활용)
+                drawEnforcementLine(gc, lane, snapPt);
+                
+                // 카메라 본체와 단속 지점 연결 가이드선 (선택 시에만)
+                if (sm.getSelectedCamera() == cam) {
+                    gc.save();
+                    gc.setStroke(Color.rgb(255, 255, 255, 0.3));
+                    gc.setLineWidth(1.0 / zoom);
+                    gc.setLineDashes(3.0 / zoom);
+                    gc.strokeLine(pos.x, pos.y, snapPt.x, snapPt.y);
+                    gc.restore();
+                }
+            }
+
+            // 2. 카메라 본체 그리기 ❤️
+            double size = 18.0;
+            if (sm.getSelectedCamera() == cam) {
+                gc.setStroke(Color.CYAN);
+                gc.setLineWidth(2.0 / zoom);
+                gc.strokeRect(pos.x - size/2 - 2/zoom, pos.y - size/2 - 2/zoom, size + 4/zoom, size + 4/zoom);
+            }
+
+            // 본체 아이콘 (진한 회색 상자 + 렌즈)
+            gc.setFill(Color.rgb(45, 52, 54));
+            gc.fillRoundRect(pos.x - size/2, pos.y - size/2, size, size, 4, 4);
+            
+            gc.setFill(Color.rgb(223, 230, 233));
+            gc.fillOval(pos.x - size/4, pos.y - size/4, size/2, size/2); // 렌즈 외곽
+            
+            gc.setFill(Color.rgb(45, 52, 54));
+            gc.fillOval(pos.x - size/8, pos.y - size/8, size/4, size/4); // 렌즈 중심
+            
+            // 빨간색 작동 램프
+            gc.setFill(Color.RED);
+            gc.fillOval(pos.x + size/4, pos.y - size/3, 3, 3);
+        }
+    }
+
+    /**
+     * 특정 지점에 차선 너비만큼의 단속선을 그립니다. ❤️
+     */
+    private void drawEnforcementLine(GraphicsContext gc, Lane lane, Point2D.Double centerPt) {
+        List<Point2D.Double> path = lane.getLanePath();
+        if (path.size() < 2) return;
+
+        // 가장 가까운 세그먼트 찾기
+        int idx = 0;
+        double minDist = Double.MAX_VALUE;
+        for (int i = 0; i < path.size(); i++) {
+            double d = path.get(i).distance(centerPt);
+            if (d < minDist) {
+                minDist = d;
+                idx = i;
+            }
+        }
+
+        // 방향 벡터 계산
+        Point2D.Double p1 = (idx < path.size() - 1) ? path.get(idx) : path.get(idx - 1);
+        Point2D.Double p2 = (idx < path.size() - 1) ? path.get(idx + 1) : path.get(idx);
+        
+        double dx = p2.x - p1.x;
+        double dy = p2.y - p1.y;
+        double len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 1e-6) return;
+
+        double nx = -dy / len;
+        double ny = dx / len;
+
+        double halfWidth = 20.0; // 기본값
+        // 실제 차선 너비를 찾기 위한 도로 검색 (최적화 가능)
+        // 여기서는 시각적인 효과를 위해 고정 너비를 쓰거나 파라미터로 받을 수 있음
+
+        gc.strokeLine(
+            centerPt.x - nx * halfWidth, centerPt.y - ny * halfWidth,
+            centerPt.x + nx * halfWidth, centerPt.y + ny * halfWidth
+        );
     }
 
     private void drawRegisteredLanesHighlight(GraphicsContext gc, List<Road> roads,

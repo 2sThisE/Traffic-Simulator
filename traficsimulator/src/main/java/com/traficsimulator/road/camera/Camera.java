@@ -17,20 +17,21 @@ public class Camera {
     private Map<Lane, Point2D.Double> targetLaneMap = new HashMap<>(); 
     private int limitSpeed;
     private Point2D.Double loc; 
+    private Road road;
 
     /**
-     * 지능형 생성자: 기준 차선을 기반으로 감시 대상을 자동 등록하고, 위치를 중앙으로 조정합니다. ❤️
+     * 지능형 생성자: 기준 차선을 기반으로 감시 대상을 자동 등록하고, 위치를 중앙으로 조정합니다.
      */
     public Camera(Road road, Point2D.Double loc, Lane selectLane) {
+        this.road=road;
         this.limitSpeed = road.getLimitSpeed();
-        this.loc = new Point2D.Double(loc.x, loc.y); // 원본 좌표 복사
+        this.loc = new Point2D.Double(loc.x, loc.y); 
         
         List<Lane> laneList = road.getCanChangeLaneList(selectLane);
         for (Lane lane : laneList) {
             addTargetLane(lane);
         }
         
-        // 모든 차선이 등록된 후 카메라 위치를 중앙으로 이동! ❤️
         updateLocationToCenter();
     }
 
@@ -39,21 +40,19 @@ public class Camera {
      */
     public void addTargetLane(Lane lane) {
         if (lane == null || loc == null) return;
-        
+        if (!road.getLaneList().contains(lane)) return;
+        // 차선 경로(선분) 위에서 가장 가까운 점을 찾도록 수정! ❤️
         Point2D.Double snapPt = findNearestPointOnLane(lane, this.loc);
         targetLaneMap.put(lane, snapPt);
     }
 
-    /**
-     * 감시할 차선을 목록에서 제거합니다.
-     */
     public void removeTargetLane(Lane lane) {
         targetLaneMap.remove(lane);
-        updateLocationToCenter(); // 차선이 빠지면 중앙점도 다시 잡아야지? ❤️
+        updateLocationToCenter();
     }
 
     /**
-     * 카메라 위치를 현재 감시 중인 모든 차선의 단속 지점 중앙으로 이동시킵니다. ❤️
+     * 카메라 위치를 현재 감시 중인 모든 차선의 단속 지점 중앙으로 이동시킵니다.
      */
     public void updateLocationToCenter() {
         if (targetLaneMap.isEmpty()) return;
@@ -69,40 +68,61 @@ public class Camera {
     }
 
     /**
-     * 도로 모양이 변했을 때, 단속 지점을 재계산하고 카메라 위치도 중앙으로 다시 맞춥니다. ❤️
+     * 도로 모양이 변하거나 카메라가 이동했을 때 단속 지점을 재계산합니다. ❤️
      */
     public void refreshEnforcementPoints() {
         if (targetLaneMap.isEmpty()) return;
         
-        // 현재 카메라 위치를 기준으로 새로운 스냅 포인트들을 찾음
         for (Lane lane : new HashSet<>(targetLaneMap.keySet())) {
             Point2D.Double newSnapPt = findNearestPointOnLane(lane, this.loc);
             targetLaneMap.put(lane, newSnapPt);
         }
         
-        // 다시 한번 중앙 정렬!
+        // 단속 지점들이 갱신되면 카메라 위치도 미세하게 중앙으로 보정! ❤️
         updateLocationToCenter();
     }
 
+    /**
+     * 차선 경로(선분들) 중에서 특정 좌표와 가장 가까운 지점을 계산합니다. (선분 투영 적용) ❤️
+     */
     private Point2D.Double findNearestPointOnLane(Lane lane, Point2D.Double referencePt) {
-        Point2D.Double nearest = null;
+        List<Point2D.Double> path = lane.getLanePath();
+        if (path == null || path.size() < 2) return null;
+
+        Point2D.Double bestPt = null;
         double minDistance = Double.MAX_VALUE;
 
-        if (lane.getLanePath() != null) {
-            for (Point2D.Double pathPt : lane.getLanePath()) {
-                double dist = pathPt.distance(referencePt);
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    nearest = pathPt;
-                }
+        for (int i = 0; i < path.size() - 1; i++) {
+            Point2D.Double v = path.get(i);
+            Point2D.Double w = path.get(i + 1);
+            
+            // 선분 v-w 위에서 referencePt와 가장 가까운 점 계산 (Projection) ❤️
+            Point2D.Double nearestOnSegment = getNearestPointOnSegment(referencePt, v, w);
+            double d = nearestOnSegment.distance(referencePt);
+            
+            if (d < minDistance) {
+                minDistance = d;
+                bestPt = nearestOnSegment;
             }
         }
-        return nearest;
+        return bestPt;
+    }
+
+    /**
+     * 선분(v-w) 위에서 점 p와 가장 가까운 좌표를 계산하여 반환합니다.
+     */
+    private Point2D.Double getNearestPointOnSegment(Point2D.Double p, Point2D.Double v, Point2D.Double w) {
+        double l2 = v.distanceSq(w);
+        if (l2 == 0.0) return v;
+        double t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return new Point2D.Double(v.x + t * (w.x - v.x), v.y + t * (w.y - v.y));
     }
 
     public Map<Lane, Point2D.Double> getTargetLaneMap() { return targetLaneMap; }
     public Point2D.Double getLoc() { return loc; }
     public void setLoc(Point2D.Double loc) { 
+        // 외부(드래그 등)에서 위치를 강제로 설정할 때 사용 ❤️
         this.loc.setLocation(loc); 
         refreshEnforcementPoints(); 
     }

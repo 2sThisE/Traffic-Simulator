@@ -32,6 +32,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.traficsimulator.road.camera.Camera; // 추가 ❤️
+
 public class PropertyManager {
     private final GridPane grid;
     private final Runnable onPropertyChanged;
@@ -56,6 +58,8 @@ public class PropertyManager {
             renderRoadProperties(road);
         } else if (selected instanceof TraficLight tl) {
             renderTraficLightProperties(tl);
+        } else if (selected instanceof Camera cam) { // 카메라 속성창 연결 ❤️
+            renderCameraProperties(cam);
         } else if (selected instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Lane) {
             @SuppressWarnings("unchecked")
             List<Lane> lanes = (List<Lane>) list;
@@ -67,6 +71,76 @@ public class PropertyManager {
         } else if (selected instanceof Lane lane) {
             renderLaneProperties(lane, parentRoad);
         }
+    }
+
+    /**
+     * 카메라 속성창을 렌더링합니다. ❤️
+     */
+    private void renderCameraProperties(Camera cam) {
+        addTitle("Enforcement Camera");
+        
+        addInfo("Position", String.format("%.1f, %.1f", cam.getLoc().x, cam.getLoc().y));
+        
+        // 1. 단속 속도 수정
+        addProperty("Speed Limit (km/h)", String.valueOf(cam.getLimitSpeed()), true, val -> {
+            try {
+                cam.setLimitSpeed(Integer.parseInt(val));
+            } catch (NumberFormatException e) {
+            }
+        });
+
+        addSeparator();
+        
+        // 2. 감시 차선 등록 버튼
+        List<Lane> selectedLanes = selectionManager.getSelectedLanes();
+        if (!selectedLanes.isEmpty()) {
+            Button regBtn = new Button("Register " + selectedLanes.size() + " Lanes to Camera");
+            regBtn.setStyle("-fx-background-color: #273c75; -fx-text-fill: white; -fx-font-weight: bold;");
+            regBtn.setMaxWidth(Double.MAX_VALUE);
+            regBtn.setOnAction(e -> {
+                for (Lane l : selectedLanes) {
+                    cam.addTargetLane(l);
+                }
+                onPropertyChanged.run();
+                updateProperties(cam, null);
+            });
+            grid.add(regBtn, 0, grid.getRowCount(), 2, 1);
+            addSeparator();
+        }
+
+        // 3. 감시 중인 차선 리스트
+        addTitle("Monitored Lanes");
+        Set<Lane> registeredLanes = cam.getTargetLaneMap().keySet();
+        if (!registeredLanes.isEmpty()) {
+            ListView<Lane> listView = new ListView<>(FXCollections.observableArrayList(registeredLanes));
+            listView.setPrefHeight(120);
+            listView.setCellFactory(lv -> new ListCell<>() {
+                @Override protected void updateItem(Lane item, boolean empty) {
+                    super.updateItem(item, empty);
+                    if (empty || item == null) setText(null);
+                    else setText("Lane ID: " + (item.hashCode() % 1000) + " (" + (item.isRoadDirection() ? "Up" : "Down") + ")");
+                }
+            });
+            listView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+                selectionManager.setHighlightedLane(newV); // 리스트 아이템 클릭 시 해당 차선 강조 ❤️
+                onPropertyChanged.run();
+            });
+            grid.add(listView, 0, grid.getRowCount(), 2, 1);
+        } else {
+            grid.add(new Label("No lanes registered."), 0, grid.getRowCount(), 2, 1);
+        }
+
+        addSeparator();
+        
+        Button delCamBtn = new Button("Delete This Camera");
+        delCamBtn.setStyle("-fx-background-color: #e84118; -fx-text-fill: white; -fx-font-weight: bold;");
+        delCamBtn.setMaxWidth(Double.MAX_VALUE);
+        delCamBtn.setOnAction(e -> {
+            roadManager.removeCamera(cam);
+            selectionManager.clearSelection();
+            onPropertyChanged.run();
+        });
+        grid.add(delCamBtn, 0, grid.getRowCount(), 2, 1);
     }
 
     private void renderTraficLightProperties(TraficLight tl) {
