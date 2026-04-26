@@ -121,13 +121,13 @@ public class PropertyManager {
         HBox addButtons = new HBox(5);
         Button addUp = new Button("+ Lane (Up)");
         addUp.setOnAction(e -> {
-            road.addLane(true, road.getLaneList().size());
+            road.addLane(true, road.getLaneList().size()); // 상행은 맨 오른쪽에 ❤️
             refreshAll(road);
         });
         
         Button addDown = new Button("+ Lane (Down)");
         addDown.setOnAction(e -> {
-            road.addLane(false, road.getLaneList().size());
+            road.addLane(false, 0); // 하행은 맨 왼쪽에 ❤️
             refreshAll(road);
         });
         addButtons.getChildren().addAll(addUp, addDown);
@@ -169,9 +169,24 @@ public class PropertyManager {
         });
         grid.add(dirCb, 0, grid.getRowCount(), 2, 1);
         
-        // --- 부모 도로 선택 기능 복구! --- ❤️
         if (road != null) {
             addSeparator();
+            
+            // --- 차선 개별 삭제 버튼 추가! --- ❤️
+            Button delLaneBtn = new Button("Delete This Lane");
+            delLaneBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;");
+            delLaneBtn.setMaxWidth(Double.MAX_VALUE);
+            delLaneBtn.setOnAction(e -> {
+                junctionController.removeLaneConnections(lane);
+                int idx = road.getLaneNum(lane);
+                if (idx != -1) {
+                    road.deleteLane(idx);
+                    selectionManager.clearSelection(); // 삭제했으니 선택 해제 ❤️
+                    refreshAll(road);
+                }
+            });
+            grid.add(delLaneBtn, 0, grid.getRowCount(), 2, 1);
+
             Button selectRoadBtn = new Button("Select Parent Road");
             selectRoadBtn.setMaxWidth(Double.MAX_VALUE);
             selectRoadBtn.setOnAction(e -> {

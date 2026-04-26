@@ -118,7 +118,6 @@ public class SimulatorController {
                 Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
                 RoadManager.PointHit hit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
                 
-                // 점 조절 효과 강화: 선택된 도로의 점일 때만 호버링 표시 ❤️
                 if (hit != null && hit.road != selectionManager.getSelectedRoad()) {
                     hit = null;
                 }
@@ -140,29 +139,37 @@ public class SimulatorController {
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMousePressed(e, "Road", cameraX, cameraY, zoomFactor);
                 } else {
-                    // 1. 점 편집 시도 (선택된 도로의 점만 + 잠금 체크) ❤️
                     RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
                     if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
                         editTool.startEditing(pointHit.road, pointHit.type);
                     } else {
-                        // 2. 일반 선택 및 이동
                         RoadManager.HitResult hit = roadManager.findHit(worldPt);
                         if (hit.road != null) {
                             if (shiftDown) {
                                 if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
                             } else {
-                                if (e.getClickCount() == 2) {
-                                    selectionManager.selectRoad(hit.road);
-                                } else {
-                                    if (hit.lane != null) {
-                                        selectionManager.selectLane(hit.road, hit.lane, false);
-                                    } else {
-                                        selectionManager.selectRoad(hit.road);
+                                Road currentlySelectedRoad = selectionManager.getSelectedRoad();
+                                
+                                if (currentlySelectedRoad == hit.road) {
+                                    // 1. 도로가 이미 선택된 상태라면 ❤️
+                                    if (e.getClickCount() == 2) {
+                                        // 더블 클릭 시에만 차선 선택으로 변경! ❤️
+                                        if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
                                     }
-                                }
-                                // 이동도 잠기지 않았을 때만 시작 ❤️
-                                if (!hit.road.isLock()) {
-                                    moveTool.startMoving(hit.road, worldPt);
+                                    // 싱글 클릭이든 더블 클릭이든 일단 이동 로직은 가동 (편의상)
+                                    if (!hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
+                                } else {
+                                    // 2. 도로가 선택되지 않았거나 다른 도로를 눌렀을 때
+                                    if (e.getClickCount() == 2) {
+                                        selectionManager.selectRoad(hit.road);
+                                    } else {
+                                        if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
+                                        else selectionManager.selectRoad(hit.road);
+                                    }
+                                    
+                                    if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) {
+                                        moveTool.startMoving(hit.road, worldPt);
+                                    }
                                 }
                             }
                         } else {

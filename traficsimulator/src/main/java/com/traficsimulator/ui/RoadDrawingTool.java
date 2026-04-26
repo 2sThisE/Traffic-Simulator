@@ -16,10 +16,11 @@ public class RoadDrawingTool {
     private final JunctionController junctionController;
     private Point2D.Double dragStart; 
     private Point2D.Double currentMouse; 
+    private RoadManager.PointHit startSnap; // 시작 시 스냅 정보 저장 ❤️
     private boolean isDrawing = false;
     private final Runnable onUpdate;
 
-    private static final double SNAP_THRESHOLD = 15.0;
+    private static final double SNAP_THRESHOLD = 20.0;
 
     public RoadDrawingTool(RoadManager roadManager, JunctionController jc, Runnable onUpdate) {
         this.roadManager = roadManager;
@@ -30,11 +31,11 @@ public class RoadDrawingTool {
     public void handleMousePressed(MouseEvent e, String selectedComponent, double camX, double camY, double zoom) {
         if ("Road".equals(selectedComponent)) {
             Point2D.Double worldPt = screenToWorld(e.getX(), e.getY(), camX, camY, zoom);
-            RoadManager.PointHit snap = roadManager.findNearestPoint(worldPt, SNAP_THRESHOLD / zoom);
+            startSnap = roadManager.findNearestPoint(worldPt, SNAP_THRESHOLD / zoom);
             
-            if (snap != null) {
-                // 좌표값만 복사해서 새로운 객체 생성 (연동 방지 ❤️)
-                Point2D.Double snapPt = (snap.type == RoadManager.PointType.START) ? snap.road.getStartPoint() : snap.road.getEndPoint();
+            if (startSnap != null) {
+                // 좌표값만 복사 (객체 분리 ❤️)
+                Point2D.Double snapPt = (startSnap.type == RoadManager.PointType.START) ? startSnap.road.getStartPoint() : startSnap.road.getEndPoint();
                 dragStart = new Point2D.Double(snapPt.x, snapPt.y);
             } else {
                 dragStart = worldPt;
@@ -61,15 +62,12 @@ public class RoadDrawingTool {
     public void handleMouseReleased(MouseEvent e, double camX, double camY, double zoom) {
         if (isDrawing && dragStart != null) {
             Point2D.Double worldPt = screenToWorld(e.getX(), e.getY(), camX, camY, zoom);
-            
-            // 시작점과 끝점의 스냅 정보 다시 확인
-            RoadManager.PointHit startSnap = roadManager.findNearestPoint(dragStart, SNAP_THRESHOLD / zoom);
             RoadManager.PointHit endSnap = roadManager.findNearestPoint(worldPt, SNAP_THRESHOLD / zoom);
             
             Point2D.Double finalEnd;
             if (endSnap != null) {
                 Point2D.Double snapPt = (endSnap.type == RoadManager.PointType.START) ? endSnap.road.getStartPoint() : endSnap.road.getEndPoint();
-                finalEnd = new Point2D.Double(snapPt.x, snapPt.y); // 객체 분리 ❤️
+                finalEnd = new Point2D.Double(snapPt.x, snapPt.y);
             } else {
                 finalEnd = worldPt;
             }
@@ -77,7 +75,7 @@ public class RoadDrawingTool {
             if (dragStart.distance(finalEnd) > 5.0) {
                 Road newRoad = new Road(dragStart, finalEnd, false);
                 
-                // 차선 구성 복제 (스냅된 도로 기준)
+                // 스냅된 도로가 있으면 차선 구성을 복제 ❤️
                 Road template = (startSnap != null) ? startSnap.road : (endSnap != null ? endSnap.road : null);
                 if (template != null) {
                     List<Lane> templateLanes = template.getLaneList();
@@ -85,15 +83,19 @@ public class RoadDrawingTool {
                         newRoad.addLane(templateLanes.get(i).isRoadDirection(), i);
                     }
                 } else {
-                    newRoad.addLane(false, 0); 
+                    newRoad.addLane(false, 0); // 기본 2차선
                     newRoad.addLane(true, 1);  
                 }
 
                 roadManager.addRoad(newRoad);
 
-                // 지능형 양방향 순차 연결 ❤️
-                if (startSnap != null) connectRoadsAtPoint(startSnap.road, startSnap.type, newRoad, RoadManager.PointType.START);
-                if (endSnap != null) connectRoadsAtPoint(newRoad, RoadManager.PointType.END, endSnap.road, endSnap.type);
+                // 순차적 자동 연결 (1:1 매칭) ❤️
+                if (startSnap != null) {
+                    connectSequentially(startSnap.road, startSnap.type, newRoad, RoadManager.PointType.START);
+                }
+                if (endSnap != null) {
+                    connectSequentially(newRoad, RoadManager.PointType.END, endSnap.road, endSnap.type);
+                }
             }
             
             resetDrawing();
@@ -101,10 +103,7 @@ public class RoadDrawingTool {
         }
     }
 
-    /**
-     * 두 도로가 맞닿은 점의 타입을 분석하여 모든 가능한 차선을 1:1로 자동 연결합니다.
-     */
-    private void connectRoadsAtPoint(Road r1, RoadManager.PointType t1, Road r2, RoadManager.PointType t2) {
+    private void connectSequentially(Road r1, RoadManager.PointType t1, Road r2, RoadManager.PointType t2) {
         List<Lane> lanes1 = r1.getLaneList();
         List<Lane> lanes2 = r2.getLaneList();
         int count = Math.min(lanes1.size(), lanes2.size());
@@ -113,27 +112,25 @@ public class RoadDrawingTool {
             Lane l1 = lanes1.get(i);
             Lane l2 = lanes2.get(i);
 
-            // 1. R1에서 R2로 가는 흐름 체크
+            // r1의 i번 차선이 나가고 r2의 i번 차선이 들어오는 경우 ❤️
             if (isExiting(l1, t1) && isEntering(l2, t2)) {
                 junctionController.addConnection(l1, l2, LaneType.STRAIGHT);
             }
-            // 2. R2에서 R1으로 가는 흐름 체크
+            // r2의 i번 차선이 나가고 r1의 i번 차선이 들어오는 경우 ❤️
             if (isExiting(l2, t2) && isEntering(l1, t1)) {
                 junctionController.addConnection(l2, l1, LaneType.STRAIGHT);
             }
         }
     }
 
-    // 차선 방향(Up/Down)과 끝점 타입(START/END)을 조합해 진출 여부 판별 ❤️
     private boolean isExiting(Lane lane, RoadManager.PointType type) {
-        if (lane.isRoadDirection()) return type == RoadManager.PointType.END; // 상행은 END에서 나감
-        else return type == RoadManager.PointType.START; // 하행은 START에서 나감
+        if (lane.isRoadDirection()) return type == RoadManager.PointType.END;
+        else return type == RoadManager.PointType.START;
     }
 
-    // 차선 방향과 끝점 타입을 조합해 진입 여부 판별 ❤️
     private boolean isEntering(Lane lane, RoadManager.PointType type) {
-        if (lane.isRoadDirection()) return type == RoadManager.PointType.START; // 상행은 START로 들어옴
-        else return type == RoadManager.PointType.END; // 하행은 END로 들어옴
+        if (lane.isRoadDirection()) return type == RoadManager.PointType.START;
+        else return type == RoadManager.PointType.END;
     }
 
     public Point2D.Double screenToWorld(double sx, double sy, double camX, double camY, double zoom) {
@@ -151,6 +148,7 @@ public class RoadDrawingTool {
         isDrawing = false;
         dragStart = null;
         currentMouse = null;
+        startSnap = null;
     }
 
     public List<Road> getRoadList() { return roadManager.getRoadList(); }
