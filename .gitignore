@@ -29,3 +29,6 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+#else
+*.img
