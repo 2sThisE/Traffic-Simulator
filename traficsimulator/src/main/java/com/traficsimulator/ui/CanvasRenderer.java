@@ -34,10 +34,10 @@ public class CanvasRenderer {
 
         // 1. 도로 본체 그리기
         for (Road road : roads) {
-            drawRoad(gc, road, selectionManager);
+            drawRoad(gc, road, selectionManager, zoom);
         }
 
-        // 2. 교차로 그리기 (아스팔트는 항상, 유도선은 선택 시) ❤️
+        // 2. 교차로 연결부 그리기 (아스팔트는 항상, 유도선은 선택 시)
         drawJunctionConnections(gc, roads, junctionController, selectionManager, zoom);
 
         // 3. 포인트 조절 핸들 그리기
@@ -58,7 +58,7 @@ public class CanvasRenderer {
                                          SelectionManager sm, double zoom) {
         if (jc == null) return;
 
-        // --- Pass 1: 모든 아스팔트 바닥 깔기 (항상 노출!) --- ❤️
+        // --- Pass 1: 모든 아스팔트 바닥 깔기 (항상 노출!) ---
         gc.setLineCap(StrokeLineCap.BUTT);
         gc.setLineDashes(0);
         gc.setStroke(Color.rgb(50, 50, 50));
@@ -74,7 +74,7 @@ public class CanvasRenderer {
             }
         }
 
-        // --- Pass 2: 선택된 유도선 및 강조 효과 --- ❤️
+        // --- Pass 2: 선택된 유도선 및 강조 효과 ---
         List<Lane> selectedLanes = sm.getSelectedLanes();
         LaneConnection selectedConn = sm.getSelectedConnection();
 
@@ -86,7 +86,6 @@ public class CanvasRenderer {
                     drawSingleGuideline(gc, conn, conn == selectedConn, true, zoom);
                 }
             }
-            // 리스트에서 직접 선택된 특정 연결선 강조
             if (selectedConn != null) {
                 drawSingleGuideline(gc, selectedConn, true, false, zoom);
             }
@@ -158,29 +157,40 @@ public class CanvasRenderer {
         gc.strokeOval(pt.x - r, pt.y - r, r * 2, r * 2);
     }
 
-    private void drawRoad(GraphicsContext gc, Road road, SelectionManager sm) {
+    private void drawRoad(GraphicsContext gc, Road road, SelectionManager sm, double zoom) {
         List<Point2D.Double> centerPoints = road.getPathPoints();
         if (centerPoints.size() < 2) return;
         List<Lane> lanes = road.getLaneList();
         double laneWidth = road.getLaneWidth();
         double totalWidth = lanes.size() * laneWidth;
 
+        // 도로 외곽 하이라이트 (선택 시)
         if (sm.isSelected(road)) {
             gc.setStroke(Color.web("00FFFF", 0.3)); gc.setLineWidth(totalWidth + 10.0); strokePath(gc, centerPoints);
         }
 
+        // 아스팔트 바닥
         gc.setStroke(Color.rgb(50, 50, 50)); gc.setLineWidth(totalWidth); gc.setLineCap(StrokeLineCap.BUTT);
         strokePath(gc, centerPoints);
 
         for (Lane lane : lanes) {
             boolean isTarget = (sm.getSelectedConnection() != null && sm.getSelectedConnection().targetLane() == lane);
             if (sm.isSelected(lane) || isTarget) {
-                gc.setStroke(isTarget ? Color.MAGENTA : Color.web("00FFFF", 0.5));
+                // 1. 차선 하이라이트 (민트색/분홍색 배경)
+                gc.setStroke(isTarget ? Color.web("FF00FF", 0.4) : Color.web("00FFFF", 0.4));
                 gc.setLineWidth(laneWidth);
                 strokePath(gc, lane.getLanePath());
+
+                // 2. 차량 통행 라인 (중앙 점선) ❤️
+                gc.setStroke(Color.WHITE);
+                gc.setLineWidth(1.0 / zoom);
+                gc.setLineDashes(5.0 / zoom, 5.0 / zoom);
+                strokePath(gc, lane.getLanePath());
+                gc.setLineDashes(0);
             }
         }
 
+        // 경계선 및 차선선
         for (int i = 0; i <= lanes.size(); i++) {
             double offset = (i - lanes.size() / 2.0) * laneWidth;
             List<Point2D.Double> boundaryPath = generateOffsetPath(centerPoints, offset);

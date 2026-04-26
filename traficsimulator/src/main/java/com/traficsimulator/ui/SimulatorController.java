@@ -45,20 +45,19 @@ public class SimulatorController {
     private double cameraY = 0;
     private double zoomFactor = 1.0;
     private RoadManager.PointHit hoveredPoint;
-@FXML
-public void initialize() {
-    roadManager = new RoadManager();
-    selectionManager = new SelectionManager();
-    junctionController = new JunctionController();
-    renderer = new CanvasRenderer(mainCanvas);
-    // RoadDrawingTool에 junctionController 추가 ❤️
-    drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
 
-    moveTool = new RoadMoveTool(() -> {
-        refreshAllConnections();
-        requestRender();
-    });
-
+    @FXML
+    public void initialize() {
+        roadManager = new RoadManager();
+        selectionManager = new SelectionManager();
+        junctionController = new JunctionController();
+        renderer = new CanvasRenderer(mainCanvas);
+        drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
+        
+        moveTool = new RoadMoveTool(() -> {
+            refreshAllConnections();
+            requestRender();
+        });
         editTool = new RoadEditTool(() -> {
             refreshAllConnections();
             requestRender();
@@ -118,6 +117,12 @@ public void initialize() {
             if (modeManager.getMode() == EditorMode.SELECT) {
                 Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
                 RoadManager.PointHit hit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
+                
+                // 점 조절 효과 강화: 선택된 도로의 점일 때만 호버링 표시 ❤️
+                if (hit != null && hit.road != selectionManager.getSelectedRoad()) {
+                    hit = null;
+                }
+
                 if (hit != hoveredPoint) {
                     hoveredPoint = hit;
                     requestRender();
@@ -135,10 +140,12 @@ public void initialize() {
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMousePressed(e, "Road", cameraX, cameraY, zoomFactor);
                 } else {
+                    // 1. 점 편집 시도 (선택된 도로의 점만 + 잠금 체크) ❤️
                     RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
-                    if (pointHit != null && !shiftDown) {
+                    if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
                         editTool.startEditing(pointHit.road, pointHit.type);
                     } else {
+                        // 2. 일반 선택 및 이동
                         RoadManager.HitResult hit = roadManager.findHit(worldPt);
                         if (hit.road != null) {
                             if (shiftDown) {
@@ -153,7 +160,10 @@ public void initialize() {
                                         selectionManager.selectRoad(hit.road);
                                     }
                                 }
-                                moveTool.startMoving(hit.road, worldPt);
+                                // 이동도 잠기지 않았을 때만 시작 ❤️
+                                if (!hit.road.isLock()) {
+                                    moveTool.startMoving(hit.road, worldPt);
+                                }
                             }
                         } else {
                             if (!shiftDown) selectionManager.clearSelection();

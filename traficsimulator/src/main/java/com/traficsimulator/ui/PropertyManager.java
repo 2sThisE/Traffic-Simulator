@@ -81,10 +81,24 @@ public class PropertyManager {
         addTitle("Road Properties");
         
         addInfo("Total Length", String.format("%.1f px", road.getRoadLength()));
+        
+        addProperty("Speed Limit (km/h)", String.valueOf(road.getLimitSpeed()), true, val -> {
+            try {
+                road.setLimitSpeed(Integer.parseInt(val));
+            } catch (NumberFormatException e) {
+            }
+        });
+
         addInfo("Lane Width", String.format("%.1f px", road.getLaneWidth()));
         
         addSeparator();
         
+        // --- 도로 잠금 기능 (Is Locked) --- ❤️
+        addCheckBox("Is Locked", road.isLock(), selected -> {
+            road.setMoveable(selected); // Road 클래스의 메서드명이 setMoveable임
+            refreshAll(road);
+        });
+
         boolean curved = road.getPathPoints().size() > 2;
         addCheckBox("Is Curved", curved, selected -> {
             if (selected) {
@@ -208,6 +222,31 @@ public class PropertyManager {
         Label valLabel = new Label(value);
         valLabel.setStyle("-fx-text-fill: #555;");
         grid.add(valLabel, 1, row);
+    }
+
+    private void addProperty(String name, String value, boolean editable, java.util.function.Consumer<String> onApply) {
+        int row = grid.getRowCount();
+        grid.add(new Label(name + ":"), 0, row);
+        
+        if (editable) {
+            javafx.scene.control.TextField tf = new javafx.scene.control.TextField(value);
+            tf.setPrefWidth(100);
+            tf.setOnAction(e -> {
+                onApply.accept(tf.getText());
+                onPropertyChanged.run();
+            });
+            tf.focusedProperty().addListener((obs, oldV, newV) -> {
+                if (!newV) {
+                    onApply.accept(tf.getText());
+                    onPropertyChanged.run();
+                }
+            });
+            grid.add(tf, 1, row);
+        } else {
+            Label valLabel = new Label(value);
+            valLabel.setStyle("-fx-text-fill: #7f8c8d;");
+            grid.add(valLabel, 1, row);
+        }
     }
 
     private void addSeparator() {

@@ -26,7 +26,9 @@ public class RoadManager {
         Lane bestLane = null;
         double minRoadDist = 20.0;
 
-        for (Road road : roadList) {
+        // 리스트를 뒤에서부터 훑어서 가장 위에 있는 도로를 먼저 찾음 ❤️
+        for (int i = roadList.size() - 1; i >= 0; i--) {
+            Road road = roadList.get(i);
             for (Lane lane : road.getLaneList()) {
                 double dist = getDistanceToPath(worldPt, lane.getLanePath());
                 if (dist < road.getLaneWidth() / 2.0) {
@@ -35,17 +37,20 @@ public class RoadManager {
             }
             double centerDist = getDistanceToPath(worldPt, road.getPathPoints());
             if (centerDist < minRoadDist) {
+                // 더 나은 후보(위에 있는 도로)를 위해 루프를 계속 돌되, 가장 마지막에 찾은 게 가장 위임
                 bestRoad = road;
+                return new HitResult(bestRoad, null); // 도로 중심선도 위에 있는 거 우선!
             }
         }
         return new HitResult(bestRoad, null);
     }
 
     /**
-     * 시작점, 끝점 또는 베지어 제어점 근처인지 확인합니다.
+     * 시작점, 끝점 또는 베지어 제어점 근처인지 확인합니다. (위에서부터 탐색) ❤️
      */
     public PointHit findNearestPoint(Point2D.Double worldPt, double threshold) {
-        for (Road road : roadList) {
+        for (int i = roadList.size() - 1; i >= 0; i--) {
+            Road road = roadList.get(i);
             // 1. 시작/끝점 체크
             if (worldPt.distance(road.getStartPoint()) < threshold) {
                 return new PointHit(road, PointType.START);

@@ -1,0 +1,132 @@
+/* 기본 배경 및 텍스트 설정 */
+.root {
+    -fx-base: #1e1e1e;
+    -fx-background: #1e1e1e;
+    -fx-control-inner-background: #252526;
+    -fx-text-base-color: #d4d4d4;
+}
+
+/* 메뉴 바 스타일 */
+.menu-bar {
+    -fx-background-color: #333333;
+    -fx-border-color: #252526;
+    -fx-border-width: 0 0 1 0;
+}
+
+.menu-bar .label {
+    -fx-text-fill: #d4d4d4;
+}
+
+.context-menu {
+    -fx-background-color: #333333;
+    -fx-border-color: #454545;
+}
+
+/* 스플릿 팬 스타일 */
+.split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.split-pane *.split-pane-divider {
+    -fx-padding: 0 1 0 1;
+    -fx-background-color: #252526;
+}
+
+/* 사이드바 스타일 */
+.sidebar {
+    -fx-background-color: #252526;
+    -fx-padding: 15;
+}
+
+.sidebar-title {
+    -fx-text-fill: #3498db;
+    -fx-font-weight: bold;
+    -fx-font-size: 14px;
+    -fx-padding: 0 0 10 0;
+}
+
+/* 트리뷰 및 리스트뷰 */
+.tree-view, .list-view {
+    -fx-background-color: #2d2d2d;
+    -fx-background-insets: 0;
+    -fx-border-color: #3e3e3e;
+    -fx-border-radius: 4;
+}
+
+.tree-cell, .list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #cccccc;
+    -fx-padding: 5;
+}
+
+.tree-cell:filled:selected, .list-cell:filled:selected {
+    -fx-background-color: #094771;
+    -fx-text-fill: white;
+}
+
+.tree-cell:filled:hover, .list-cell:filled:hover {
+    -fx-background-color: #3e3e42;
+}
+
+/* 중앙 캔버스 컨테이너 */
+.canvas-area {
+    -fx-background-color: #1a1a1a;
+}
+
+/* 버튼 스타일 */
+.button {
+    -fx-background-color: #3e3e42;
+    -fx-text-fill: #d4d4d4;
+    -fx-border-radius: 3;
+    -fx-background-radius: 3;
+    -fx-padding: 5 15;
+}
+
+.button:hover {
+    -fx-background-color: #4e4e52;
+}
+
+.button:pressed {
+    -fx-background-color: #007acc;
+    -fx-text-fill: white;
+}
+
+.btn-primary {
+    -fx-background-color: #0e639c;
+    -fx-text-fill: white;
+}
+
+.btn-primary:hover {
+    -fx-background-color: #1177bb;
+}
+
+.btn-danger {
+    -fx-text-fill: #f48771;
+}
+
+.btn-danger:hover {
+    -fx-background-color: #903535;
+    -fx-text-fill: white;
+}
+
+/* 텍스트 필드 및 콤보 박스 */
+.text-field, .combo-box {
+    -fx-background-color: #3c3c3c;
+    -fx-text-fill: #cccccc;
+    -fx-border-color: #3e3e3e;
+    -fx-border-radius: 2;
+}
+
+.text-field:focused, .combo-box:focused {
+    -fx-border-color: #007acc;
+}
+
+/* 스크롤바 커스텀 */
+.scroll-bar:vertical .thumb, .scroll-bar:horizontal .thumb {
+    -fx-background-color: #424242;
+}
+
+.scroll-bar:vertical .thumb:hover, .scroll-bar:horizontal .thumb:hover {
+    -fx-background-color: #4f4f4f;
+}

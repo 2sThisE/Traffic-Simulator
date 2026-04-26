@@ -9,7 +9,7 @@ public class Road {
     private Point2D.Double endPoint;
     private Point2D.Double control1;
     private Point2D.Double control2;
-    
+    private boolean isLock=false;
     private boolean oneWay;
     private List<Lane> laneList = new ArrayList<>();
     private int limitSpeed;
@@ -61,6 +61,7 @@ public class Road {
      * @param laneNum
      */
     public void addLane(boolean direction, int laneNum){
+        if(isLock) return;
         laneList.add(laneNum,new Lane(direction));
         refresh(); 
     }
@@ -69,6 +70,7 @@ public class Road {
      * @param laneNum
      */
     public void deleteLane(int laneNum){
+        if(isLock) return;
         laneList.remove(laneNum);
     }
 
@@ -79,6 +81,7 @@ public class Road {
      * @param control2
      */
     public void setCurved(boolean isCurved, Point2D.Double control1, Point2D.Double control2){
+        if(isLock) return;
         this.isCurved = isCurved;
         this.control1 = control1;
         this.control2 = control2;
@@ -91,6 +94,7 @@ public class Road {
      * @param dy 이동할 Y 거리
      */
     public void move(double dx, double dy) {
+        if(isLock)return;
         startPoint.x += dx;
         startPoint.y += dy;
         endPoint.x += dx;
@@ -106,6 +110,7 @@ public class Road {
         }
         
         refresh();
+    
     }
 
     /**
@@ -218,14 +223,18 @@ public class Road {
     }
 
     public void setStartPoint(Point2D.Double startPoint) {
+        if(isLock) return;
         this.startPoint = startPoint;
         refresh();
     }
 
     public void setEndPoint(Point2D.Double endPoint) {
+        if(isLock) return;
         this.endPoint = endPoint;
         refresh();
     }
+
+    public void setMoveable(boolean lock){this.isLock=lock;}
 
     public Point2D.Double getStartPoint() { return startPoint; }
     public Point2D.Double getEndPoint() { return endPoint; }
@@ -235,6 +244,7 @@ public class Road {
     // Getter들...
     public double getRoadLength() { return roadLength; }
     public List<Point2D.Double> getPathPoints() { return pathPoints; }
+    public boolean isLock(){return isLock;}
     
     public List<Lane> getLaneList() { return laneList; }
     public Lane getLane(int laneNum){return laneList.get(laneNum);}
