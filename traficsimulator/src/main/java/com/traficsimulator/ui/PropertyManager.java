@@ -5,7 +5,13 @@ import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.LaneConnection;
 import com.traficsimulator.road.LaneType;
 import com.traficsimulator.road.Road;
+import com.traficsimulator.road.traficlight.TraficLight;
+import com.traficsimulator.road.traficlight.TraficLightSignal;
+
 import javafx.collections.FXCollections;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
@@ -15,8 +21,14 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.Separator;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.stage.Modality;
+import javafx.stage.Stage;
+
 import java.awt.geom.Point2D;
+import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class PropertyManager {
@@ -24,11 +36,14 @@ public class PropertyManager {
     private final Runnable onPropertyChanged;
     private final JunctionController junctionController;
     private final SelectionManager selectionManager;
+    private final RoadManager roadManager;
+    private final Map<TraficLight, Stage> openEditors = new HashMap<>(); // 에디터 창 관리 ❤️
 
-    public PropertyManager(GridPane grid, JunctionController jc, SelectionManager sm, Runnable onPropertyChanged) {
+    public PropertyManager(GridPane grid, JunctionController jc, SelectionManager sm, RoadManager rm, Runnable onPropertyChanged) {
         this.grid = grid;
         this.junctionController = jc;
         this.selectionManager = sm;
+        this.roadManager = rm;
         this.onPropertyChanged = onPropertyChanged;
     }
 
@@ -38,6 +53,8 @@ public class PropertyManager {
 
         if (selected instanceof Road road) {
             renderRoadProperties(road);
+        } else if (selected instanceof TraficLight tl) {
+            renderTraficLightProperties(tl);
         } else if (selected instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Lane) {
             @SuppressWarnings("unchecked")
             List<Lane> lanes = (List<Lane>) list;
@@ -48,6 +65,122 @@ public class PropertyManager {
             }
         } else if (selected instanceof Lane lane) {
             renderLaneProperties(lane, parentRoad);
+        }
+    }
+
+    private void renderTraficLightProperties(TraficLight tl) {
+        addTitle("Traffic Light Properties");
+        
+        if (tl.getCoordinates() != null) {
+            addInfo("Position", String.format("%.1f, %.1f", tl.getCoordinates().x, tl.getCoordinates().y));
+        }
+
+        addSeparator();
+        
+        // --- 차선 등록 버튼 ---
+        List<Lane> selectedLanes = selectionManager.getSelectedLanes();
+        if (!selectedLanes.isEmpty()) {
+            Button regBtn = new Button("Register " + selectedLanes.size() + " Selected Lanes");
+            regBtn.setStyle("-fx-background-color: #2ecc71; -fx-text-fill: white; -fx-font-weight: bold;");
+            regBtn.setMaxWidth(Double.MAX_VALUE);
+            regBtn.setOnAction(e -> {
+                for (Lane l : selectedLanes) {
+                    boolean alreadyRegistered = false;
+                    for (TraficLight otherTL : roadManager.getTraficLightList()) {
+                        if (otherTL.getControlLaneList().contains(l)) {
+                            alreadyRegistered = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyRegistered) {
+                        tl.addControlLane(l);
+                    }
+                }
+                tl.updatePositionToLanesCenter();
+                onPropertyChanged.run();
+                updateProperties(tl, null);
+            });
+            grid.add(regBtn, 0, grid.getRowCount(), 2, 1);
+            addSeparator();
+        }
+
+        // --- 등록된 차선 리스트 ---
+        addTitle("Registered Lanes");
+        Set<Lane> registeredLanes = tl.getControlLaneList();
+        if (registeredLanes != null && !registeredLanes.isEmpty()) {
+            ListView<Lane> listView = new ListView<>(FXCollections.observableArrayList(registeredLanes));
+            listView.setPrefHeight(120);
+            listView.setCellFactory(lv -> new ListCell<>() {
+                @Override protected void updateItem(Lane item, boolean empty) {
+                    super.updateItem(item, empty);
+                    if (empty || item == null) setText(null);
+                    else setText("Lane ID: " + (item.hashCode() % 1000) + " (" + (item.isRoadDirection() ? "Up" : "Down") + ")");
+                }
+            });
+            listView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+                selectionManager.setHighlightedLane(newV);
+                onPropertyChanged.run();
+            });
+            grid.add(listView, 0, grid.getRowCount(), 2, 1);
+        } else {
+            grid.add(new Label("No lanes registered."), 0, grid.getRowCount(), 2, 1);
+        }
+
+        addSeparator();
+        
+        // --- 1. 신호 종류 체크박스 복구! ❤️ ---
+        addTitle("Available Signals");
+        for (TraficLightSignal signal : TraficLightSignal.values()) {
+            CheckBox signalCb = new CheckBox(signal.name());
+            signalCb.setSelected(tl.getLightList().contains(signal));
+            signalCb.setOnAction(e -> {
+                if (signalCb.isSelected()) tl.addLight(signal);
+                else tl.deleteLight(signal);
+                onPropertyChanged.run();
+            });
+            grid.add(signalCb, 0, grid.getRowCount(), 2, 1);
+        }
+
+        addSeparator();
+        
+        // --- 2. 신호 주기 에디터 버튼 ---
+        Button editCycleBtn = new Button("Edit Signal Cycle Details");
+        editCycleBtn.setMaxWidth(Double.MAX_VALUE);
+        editCycleBtn.setStyle("-fx-background-color: #9b59b6; -fx-text-fill: white; -fx-font-weight: bold;");
+        editCycleBtn.setOnAction(e -> showSignalCycleEditor(tl));
+        grid.add(editCycleBtn, 0, grid.getRowCount(), 2, 1);
+    }
+
+    private void showSignalCycleEditor(TraficLight tl) {
+        // 객체 identity를 기준으로 중복 체크 수행 ❤️
+        if (openEditors.containsKey(tl)) {
+            Stage existingStage = openEditors.get(tl);
+            if (existingStage.isShowing()) {
+                existingStage.toFront();
+                return;
+            } else {
+                openEditors.remove(tl); // 닫혀있으면 제거 후 새로 생성
+            }
+        }
+
+        try {
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/com/traficsimulator/ui/signal_cycle_editor.fxml"));
+            Parent root = loader.load();
+            
+            SignalCycleEditorController controller = loader.getController();
+            controller.initData(tl, onPropertyChanged);
+            
+            Stage stage = new Stage();
+            stage.initModality(Modality.NONE); // Modeless
+            stage.setTitle("Cycle Editor - Light@" + Integer.toHexString(tl.hashCode()));
+            stage.setScene(new Scene(root));
+            
+            stage.setOnCloseRequest(e -> openEditors.remove(tl));
+            
+            stage.show();
+            openEditors.put(tl, stage);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -93,9 +226,8 @@ public class PropertyManager {
         
         addSeparator();
         
-        // --- 도로 잠금 기능 (Is Locked) --- ❤️
         addCheckBox("Is Locked", road.isLock(), selected -> {
-            road.setMoveable(selected); // Road 클래스의 메서드명이 setMoveable임
+            road.setMoveable(selected);
             refreshAll(road);
         });
 
@@ -114,26 +246,23 @@ public class PropertyManager {
         });
 
         addSeparator();
-        
-        // --- 차선 추가 기능 복구! --- ❤️
         addTitle("Lanes Management");
         
         HBox addButtons = new HBox(5);
         Button addUp = new Button("+ Lane (Up)");
         addUp.setOnAction(e -> {
-            road.addLane(true, road.getLaneList().size()); // 상행은 맨 오른쪽에 ❤️
+            road.addLane(true, road.getLaneList().size());
             refreshAll(road);
         });
         
         Button addDown = new Button("+ Lane (Down)");
         addDown.setOnAction(e -> {
-            road.addLane(false, 0); // 하행은 맨 왼쪽에 ❤️
+            road.addLane(false, 0);
             refreshAll(road);
         });
         addButtons.getChildren().addAll(addUp, addDown);
         grid.add(addButtons, 0, grid.getRowCount(), 2, 1);
 
-        // 현재 차선 목록 및 삭제 버튼
         List<Lane> lanes = road.getLaneList();
         for (int i = 0; i < lanes.size(); i++) {
             int index = i;
@@ -143,7 +272,6 @@ public class PropertyManager {
             Button delBtn = new Button("Del");
             delBtn.setStyle("-fx-text-fill: red;");
             delBtn.setOnAction(e -> {
-                // 삭제 전 연결 정보 청소! ❤️
                 junctionController.removeLaneConnections(lane);
                 road.deleteLane(index);
                 refreshAll(road);
@@ -172,7 +300,6 @@ public class PropertyManager {
         if (road != null) {
             addSeparator();
             
-            // --- 차선 개별 삭제 버튼 추가! --- ❤️
             Button delLaneBtn = new Button("Delete This Lane");
             delLaneBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;");
             delLaneBtn.setMaxWidth(Double.MAX_VALUE);
@@ -181,7 +308,7 @@ public class PropertyManager {
                 int idx = road.getLaneNum(lane);
                 if (idx != -1) {
                     road.deleteLane(idx);
-                    selectionManager.clearSelection(); // 삭제했으니 선택 해제 ❤️
+                    selectionManager.clearSelection();
                     refreshAll(road);
                 }
             });
@@ -220,9 +347,9 @@ public class PropertyManager {
     }
 
     private void refreshAll(Road road) {
-        road.refresh(); // 모델 갱신
-        updateProperties(road, null); // 속성창 갱신
-        onPropertyChanged.run(); // 캔버스 갱신
+        road.refresh();
+        updateProperties(road, null);
+        onPropertyChanged.run();
     }
 
     private void addTitle(String title) {

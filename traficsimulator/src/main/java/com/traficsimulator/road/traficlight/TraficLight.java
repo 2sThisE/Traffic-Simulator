@@ -21,6 +21,35 @@ public class TraficLight {
     public Set<TraficLightSignal> getLightList(){return lightList;}
     public void deleteLight(TraficLightSignal tl){lightList.remove(tl);}
     
+    public Set<Lane> getControlLaneList() { return controlLaneList; }
+    public void removeControlLane(Lane lane) { controlLaneList.remove(lane); }
+    public List<SignalSetting> getSignalTime() { return signalTime; } // 자기를 위해 열어둘게 ❤️
+
+    /**
+     * 등록된 모든 차선의 정지선(나가는 방향) 중앙값으로 신호등의 위치를 업데이트합니다.
+     */
+    public void updatePositionToLanesCenter() {
+        if (controlLaneList.isEmpty()) return;
+        
+        double sumX = 0;
+        double sumY = 0;
+        int count = 0;
+        for (Lane lane : controlLaneList) {
+            List<Point2D.Double> path = lane.getLanePath();
+            if (path != null && !path.isEmpty()) {
+                // 반전 처리: 상행(true)이면 끝점, 하행(false)이면 시작점이 나가는 방향! ❤️
+                Point2D.Double exitPt = lane.isRoadDirection() ? path.get(path.size() - 1) : path.get(0);
+                sumX += exitPt.x;
+                sumY += exitPt.y;
+                count++;
+            }
+        }
+        if (count > 0) {
+            if (this.coordinates == null) this.coordinates = new Point2D.Double();
+            this.coordinates.setLocation(sumX / count, sumY / count);
+        }
+    }
+    
     /**
      * 해당 신호등이 관리할 차선을 추가 합니다
      * @param lane

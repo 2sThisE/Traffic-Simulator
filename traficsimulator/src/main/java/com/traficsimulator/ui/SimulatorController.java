@@ -3,6 +3,8 @@ package com.traficsimulator.ui;
 import com.traficsimulator.road.JunctionController;
 import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.Road;
+import com.traficsimulator.road.traficlight.TraficLight;
+
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.TreeItem;
@@ -55,17 +57,20 @@ public class SimulatorController {
         drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
         
         moveTool = new RoadMoveTool(() -> {
+            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
             refreshAllConnections();
             requestRender();
         });
         editTool = new RoadEditTool(() -> {
+            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
             refreshAllConnections();
             requestRender();
         });
 
         modeManager = new EditorModeManager(componentTreeView);
         keyboardHandler = new KeyboardHandler(modeManager, drawingTool, roadManager, selectionManager, junctionController, this::requestRender);
-        propertyManager = new PropertyManager(propertyGrid, junctionController, selectionManager, () -> {
+        propertyManager = new PropertyManager(propertyGrid, junctionController, selectionManager, roadManager, () -> {
+            roadManager.refreshTrafficLightPositions(); // 신호등 위치 갱신 ❤️
             refreshAllConnections();
             requestRender();
         });
@@ -108,6 +113,7 @@ public class SimulatorController {
         TreeItem<String> root = new TreeItem<>("Components");
         root.setExpanded(true);
         root.getChildren().add(new TreeItem<>("Road"));
+        root.getChildren().add(new TreeItem<>("Traffic Light"));
         componentTreeView.setRoot(root);
         componentTreeView.setShowRoot(false);
     }
@@ -138,42 +144,55 @@ public class SimulatorController {
 
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMousePressed(e, "Road", cameraX, cameraY, zoomFactor);
+                } else if (modeManager.getMode() == EditorMode.ADD_TRAFFIC_LIGHT) {
+                    RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                    if (hit.lane != null) {
+                        TraficLight tl = new TraficLight();
+                        tl.addControlLane(hit.lane);
+                        tl.setCoordinates(worldPt);
+                        tl.updatePositionToLanesCenter();
+                        roadManager.addTraficLight(tl);
+                        selectionManager.selectTraficLight(tl);
+                        modeManager.setMode(EditorMode.SELECT); // 배치 후 선택 모드로 ❤️
+                    }
                 } else {
-                    RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
-                    if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
-                        editTool.startEditing(pointHit.road, pointHit.type);
+                    // 신호등 히트 테스트 우선! ❤️
+                    TraficLight tlHit = roadManager.findTraficLightHit(worldPt, 15.0 / zoomFactor);
+                    if (tlHit != null) {
+                        selectionManager.selectTraficLight(tlHit);
                     } else {
-                        RoadManager.HitResult hit = roadManager.findHit(worldPt);
-                        if (hit.road != null) {
-                            if (shiftDown) {
-                                if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
-                            } else {
-                                Road currentlySelectedRoad = selectionManager.getSelectedRoad();
-                                
-                                if (currentlySelectedRoad == hit.road) {
-                                    // 1. 도로가 이미 선택된 상태라면 ❤️
-                                    if (e.getClickCount() == 2) {
-                                        // 더블 클릭 시에만 차선 선택으로 변경! ❤️
-                                        if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
-                                    }
-                                    // 싱글 클릭이든 더블 클릭이든 일단 이동 로직은 가동 (편의상)
-                                    if (!hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
+                        RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
+                        if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
+                            editTool.startEditing(pointHit.road, pointHit.type);
+                        } else {
+                            RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                            if (hit.road != null) {
+                                if (shiftDown) {
+                                    if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, true);
                                 } else {
-                                    // 2. 도로가 선택되지 않았거나 다른 도로를 눌렀을 때
-                                    if (e.getClickCount() == 2) {
-                                        selectionManager.selectRoad(hit.road);
-                                    } else {
-                                        if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
-                                        else selectionManager.selectRoad(hit.road);
-                                    }
+                                    Road currentlySelectedRoad = selectionManager.getSelectedRoad();
                                     
-                                    if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) {
-                                        moveTool.startMoving(hit.road, worldPt);
+                                    if (currentlySelectedRoad == hit.road) {
+                                        if (e.getClickCount() == 2) {
+                                            if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
+                                        }
+                                        if (!hit.road.isLock()) moveTool.startMoving(hit.road, worldPt);
+                                    } else {
+                                        if (e.getClickCount() == 2) {
+                                            selectionManager.selectRoad(hit.road);
+                                        } else {
+                                            if (hit.lane != null) selectionManager.selectLane(hit.road, hit.lane, false);
+                                            else selectionManager.selectRoad(hit.road);
+                                        }
+                                        
+                                        if (selectionManager.getSelectedRoad() == hit.road && !hit.road.isLock()) {
+                                            moveTool.startMoving(hit.road, worldPt);
+                                        }
                                     }
                                 }
+                            } else {
+                                if (!shiftDown) selectionManager.clearSelection();
                             }
-                        } else {
-                            if (!shiftDown) selectionManager.clearSelection();
                         }
                     }
                     requestRender();
@@ -211,6 +230,7 @@ public class SimulatorController {
     private void requestRender() {
         renderer.render(
             roadManager.getRoadList(),
+            roadManager.getTraficLightList(),
             drawingTool.getDragStart(),
             drawingTool.getCurrentMouse(),
             drawingTool.isDrawing(),

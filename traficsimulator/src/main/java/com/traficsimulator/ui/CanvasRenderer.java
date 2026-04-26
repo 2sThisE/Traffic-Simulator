@@ -4,6 +4,8 @@ import com.traficsimulator.road.JunctionController;
 import com.traficsimulator.road.Lane;
 import com.traficsimulator.road.LaneConnection;
 import com.traficsimulator.road.Road;
+import com.traficsimulator.road.traficlight.TraficLight;
+
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
@@ -21,7 +23,8 @@ public class CanvasRenderer {
         this.canvas = canvas;
     }
 
-    public void render(List<Road> roads, Point2D.Double dragStart, Point2D.Double currentMouse, boolean isDrawing,
+    public void render(List<Road> roads, List<TraficLight> traficLights,
+                       Point2D.Double dragStart, Point2D.Double currentMouse, boolean isDrawing,
                        double cameraX, double cameraY, double zoom, SelectionManager selectionManager,
                        RoadManager.PointHit hoveredPoint, JunctionController junctionController) {
         GraphicsContext gc = canvas.getGraphicsContext2D();
@@ -40,7 +43,11 @@ public class CanvasRenderer {
         // 2. 교차로 연결부 그리기 (아스팔트는 항상, 유도선은 선택 시)
         drawJunctionConnections(gc, roads, junctionController, selectionManager, zoom);
 
-        // 3. 포인트 조절 핸들 그리기
+        // 3. 신호등 및 연결된 차선 그리기 ❤️
+        drawTraficLights(gc, traficLights, selectionManager, zoom);
+        drawRegisteredLanesHighlight(gc, roads, selectionManager, zoom);
+
+        // 4. 포인트 조절 핸들 그리기
         drawHandles(gc, roads, selectionManager, hoveredPoint, zoom);
 
         if (isDrawing && dragStart != null && currentMouse != null) {
@@ -54,11 +61,78 @@ public class CanvasRenderer {
         gc.restore();
     }
 
+    private void drawRegisteredLanesHighlight(GraphicsContext gc, List<Road> roads,
+                                             SelectionManager sm, double zoom) {
+        TraficLight selectedTL = sm.getSelectedTraficLight();
+        if (selectedTL == null) return;
+
+        Lane highlighted = sm.getHighlightedLane();
+
+        for (Lane lane : selectedTL.getControlLaneList()) {
+            double laneWidth = 20.0; // 기본값
+            
+            // 해당 차선이 속한 도로의 너비를 찾음 ❤️
+            for (Road r : roads) {
+                if (r.getLaneList().contains(lane)) {
+                    laneWidth = r.getLaneWidth();
+                    break;
+                }
+            }
+
+            if (lane == highlighted) {
+                // 리스트에서 선택된 차선: 선명한 주황색 반투명 ❤️
+                gc.setStroke(Color.ORANGERED.deriveColor(0, 1, 1, 0.5));
+            } else {
+                // 그냥 등록된 차선들: 은은한 노란색 반투명 ❤️
+                gc.setStroke(Color.YELLOW.deriveColor(0, 1, 1, 0.3));
+            }
+            
+            gc.setLineWidth(laneWidth);
+            gc.setLineCap(StrokeLineCap.BUTT);
+            strokePath(gc, lane.getLanePath());
+        }
+    }
+
+    private void drawTraficLights(GraphicsContext gc, List<TraficLight> lights, 
+                                 SelectionManager sm, double zoom) {
+        if (lights == null) return;
+        
+        double width = 12.0 / zoom;
+        double height = 30.0 / zoom;
+        double radius = 3.0 / zoom;
+
+        for (TraficLight tl : lights) {
+            Point2D.Double pos = tl.getCoordinates();
+            if (pos == null) continue;
+
+            // 선택 하이라이트
+            if (sm.getSelectedTraficLight() == tl) {
+                gc.setStroke(Color.CYAN);
+                gc.setLineWidth(2.0 / zoom);
+                gc.strokeRect(pos.x - width/2 - 2/zoom, pos.y - height/2 - 2/zoom, width + 4/zoom, height + 4/zoom);
+            }
+
+            // 신호등 본체
+            gc.setFill(Color.rgb(40, 40, 40));
+            gc.fillRect(pos.x - width/2, pos.y - height/2, width, height);
+            
+            // 신호등 램프 (빨, 노, 초) - 지금은 틱이 없으니 기본 상태로 표시 ❤️
+            double lampX = pos.x - radius;
+            gc.setFill(Color.RED.darker());
+            gc.fillOval(lampX, pos.y - height/2 + 2/zoom, radius*2, radius*2);
+            
+            gc.setFill(Color.YELLOW.darker());
+            gc.fillOval(lampX, pos.y - height/2 + 11/zoom, radius*2, radius*2);
+            
+            gc.setFill(Color.GREEN.darker());
+            gc.fillOval(lampX, pos.y - height/2 + 20/zoom, radius*2, radius*2);
+        }
+    }
+
     private void drawJunctionConnections(GraphicsContext gc, List<Road> roads, JunctionController jc, 
                                          SelectionManager sm, double zoom) {
         if (jc == null) return;
 
-        // --- Pass 1: 모든 아스팔트 바닥 깔기 (항상 노출!) ---
         gc.setLineCap(StrokeLineCap.BUTT);
         gc.setLineDashes(0);
         gc.setStroke(Color.rgb(50, 50, 50));
@@ -74,7 +148,6 @@ public class CanvasRenderer {
             }
         }
 
-        // --- Pass 2: 선택된 유도선 및 강조 효과 ---
         List<Lane> selectedLanes = sm.getSelectedLanes();
         LaneConnection selectedConn = sm.getSelectedConnection();
 
@@ -164,24 +237,20 @@ public class CanvasRenderer {
         double laneWidth = road.getLaneWidth();
         double totalWidth = lanes.size() * laneWidth;
 
-        // 도로 외곽 하이라이트 (선택 시)
         if (sm.isSelected(road)) {
             gc.setStroke(Color.web("00FFFF", 0.3)); gc.setLineWidth(totalWidth + 10.0); strokePath(gc, centerPoints);
         }
 
-        // 아스팔트 바닥
         gc.setStroke(Color.rgb(50, 50, 50)); gc.setLineWidth(totalWidth); gc.setLineCap(StrokeLineCap.BUTT);
         strokePath(gc, centerPoints);
 
         for (Lane lane : lanes) {
             boolean isTarget = (sm.getSelectedConnection() != null && sm.getSelectedConnection().targetLane() == lane);
             if (sm.isSelected(lane) || isTarget) {
-                // 1. 차선 하이라이트 (민트색/분홍색 배경)
                 gc.setStroke(isTarget ? Color.web("FF00FF", 0.4) : Color.web("00FFFF", 0.4));
                 gc.setLineWidth(laneWidth);
                 strokePath(gc, lane.getLanePath());
-
-                // 2. 차량 통행 라인 (중앙 점선) ❤️
+                
                 gc.setStroke(Color.WHITE);
                 gc.setLineWidth(1.0 / zoom);
                 gc.setLineDashes(5.0 / zoom, 5.0 / zoom);
@@ -190,7 +259,6 @@ public class CanvasRenderer {
             }
         }
 
-        // 경계선 및 차선선
         for (int i = 0; i <= lanes.size(); i++) {
             double offset = (i - lanes.size() / 2.0) * laneWidth;
             List<Point2D.Double> boundaryPath = generateOffsetPath(centerPoints, offset);

@@ -5,9 +5,11 @@ import com.traficsimulator.road.Road;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
+import com.traficsimulator.road.traficlight.TraficLight;
 
 public class RoadManager {
     private final List<Road> roadList = new ArrayList<>();
+    private final List<TraficLight> traficLightList = new ArrayList<>();
 
     public void addRoad(Road road) {
         roadList.add(road);
@@ -19,6 +21,39 @@ public class RoadManager {
 
     public List<Road> getRoadList() {
         return roadList;
+    }
+
+    public void addTraficLight(TraficLight tl) {
+        traficLightList.add(tl);
+    }
+
+    public void removeTraficLight(TraficLight tl) {
+        traficLightList.remove(tl);
+    }
+
+    public List<TraficLight> getTraficLightList() {
+        return traficLightList;
+    }
+
+    /**
+     * 모든 신호등의 위치를 등록된 차선들의 현재 상태에 맞춰 업데이트합니다. ❤️
+     */
+    public void refreshTrafficLightPositions() {
+        for (TraficLight tl : traficLightList) {
+            tl.updatePositionToLanesCenter();
+        }
+    }
+
+    /**
+     * 특정 좌표 근처에 신호등이 있는지 확인합니다.
+     */
+    public TraficLight findTraficLightHit(Point2D.Double worldPt, double threshold) {
+        for (TraficLight tl : traficLightList) {
+            if (tl.getCoordinates() != null && tl.getCoordinates().distance(worldPt) < threshold) {
+                return tl;
+            }
+        }
+        return null;
     }
 
     public HitResult findHit(Point2D.Double worldPt) {
