@@ -13,9 +13,24 @@ public class GlobalTimer {
     private final List<Tickable> listeners = new ArrayList<>();
     private final Timeline timeline;
     private int totalTicks = 0;
+    public static final double TICKLATE = 0.1;
 
-    public GlobalTimer(double secondsPerTick) {
-        timeline = new Timeline(new KeyFrame(Duration.seconds(secondsPerTick), e -> tick()));
+    /**
+     * 초(seconds)를 현재 TICKLATE 기준 틱(ticks)으로 변환합니다. ❤️
+     */
+    public static int secondsToTicks(double seconds) {
+        return (int) Math.max(1, Math.round(seconds / TICKLATE));
+    }
+
+    /**
+     * 틱(ticks)을 현재 TICKLATE 기준 초(seconds)로 변환합니다. ❤️
+     */
+    public static double ticksToSeconds(int ticks) {
+        return ticks * TICKLATE;
+    }
+
+    public GlobalTimer() {
+        timeline = new Timeline(new KeyFrame(Duration.seconds(TICKLATE), e -> tick()));
         timeline.setCycleCount(Timeline.INDEFINITE);
     }
 

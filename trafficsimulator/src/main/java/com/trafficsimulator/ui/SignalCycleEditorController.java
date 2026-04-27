@@ -22,7 +22,7 @@ public class SignalCycleEditorController {
     @FXML private TextField durationField;
     @FXML private FlowPane signalsFlowPane;
     @FXML private Button updatePhaseBtn;
-    @FXML private Label warningLabel; // FXML에 추가된 라벨 ❤️
+    @FXML private Label warningLabel; 
 
     private TrafficLight trafficLight;
     private Runnable onSave;
@@ -34,7 +34,7 @@ public class SignalCycleEditorController {
         // 모든 신호 타입에 대한 체크박스 생성
         for (TrafficLightSignal sig : TrafficLightSignal.values()) {
             CheckBox cb = new CheckBox(sig.name());
-            cb.setOnAction(e -> updateWarning()); // 체크할 때마다 실시간 감시! ❤️
+            cb.setOnAction(e -> updateWarning()); 
             signalCheckBoxes.add(cb);
             signalsFlowPane.getChildren().add(cb);
         }
@@ -49,20 +49,21 @@ public class SignalCycleEditorController {
                     String signals = Arrays.stream(item.trafficLightSignals())
                                           .map(Enum::name)
                                           .collect(Collectors.joining(", "));
-                    setText(String.format("Phase %d: [%s] (%d ticks)", getIndex() + 1, signals, item.tick()));
+                    // 틱 대신 초 단위로 표시 ❤️
+                    setText(String.format("Phase %d: [%s] (%.1f sec)", getIndex() + 1, signals, item.durationSeconds()));
                 }
             }
         });
 
         phaseListView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             if (newV != null) {
-                durationField.setText(String.valueOf(newV.tick()));
+                durationField.setText(String.valueOf(newV.durationSeconds()));
                 List<TrafficLightSignal> currentSignals = Arrays.asList(newV.trafficLightSignals());
                 for (CheckBox cb : signalCheckBoxes) {
                     cb.setSelected(currentSignals.contains(TrafficLightSignal.valueOf(cb.getText())));
                 }
                 updatePhaseBtn.setDisable(false);
-                updateWarning(); // 선택 바뀔 때도 경고 확인 ❤️
+                updateWarning(); 
             } else {
                 updatePhaseBtn.setDisable(true);
                 if (warningLabel != null) warningLabel.setVisible(false);
@@ -70,9 +71,6 @@ public class SignalCycleEditorController {
         });
     }
 
-    /**
-     * 황색 신호의 무서운(?) 진실을 사용자에게 알려줍니다. ❤️
-     */
     private void updateWarning() {
         if (warningLabel == null) return;
 
@@ -86,7 +84,6 @@ public class SignalCycleEditorController {
             }
         }
 
-        // 황색은 있는데 적색이 없다면? -> 직진차 통과 주의!
         if (hasYellow && !hasRed) {
             warningLabel.setText("⚠️ 경고: 황색 단독 신호는 '직진 차량'의 통행을 허용합니다! \n좌회전 신호 이후 '좌회전 차량만' 정리하려면 [RED + YELLOW]를 선택하세요.");
             warningLabel.setVisible(true);
@@ -99,12 +96,10 @@ public class SignalCycleEditorController {
         this.trafficLight = tl;
         this.onSave = onSave;
         
-        // 1. 기존 신호 복사해서 가져오기
         if (tl.getSignalTime() != null) {
             tempPhases.addAll(tl.getSignalTime());
         }
 
-        // 2. 신호등에 등록된 신호만 활성화 ❤️
         for (CheckBox cb : signalCheckBoxes) {
             TrafficLightSignal sig = TrafficLightSignal.valueOf(cb.getText());
             cb.setDisable(!tl.getLightList().contains(sig));
@@ -131,7 +126,8 @@ public class SignalCycleEditorController {
 
     @FXML
     private void handleAddPhase() {
-        tempPhases.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 10));
+        // 기본값을 3.0초로 추가 ❤️
+        tempPhases.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 3.0));
         phaseListView.getSelectionModel().selectLast();
     }
 
@@ -146,18 +142,17 @@ public class SignalCycleEditorController {
         int idx = phaseListView.getSelectionModel().getSelectedIndex();
         if (idx != -1) {
             try {
-                // 1. 기간(Ticks) 유효성 검사 ❤️
+                // 초(Seconds) 유효성 검사 ❤️
                 String durationText = durationField.getText();
                 if (durationText == null || durationText.trim().isEmpty()) {
                     return;
                 }
                 
-                int ticks = Integer.parseInt(durationText.trim());
-                if (ticks <= 0) {
+                double seconds = Double.parseDouble(durationText.trim());
+                if (seconds <= 0) {
                     return;
                 }
 
-                // 2. 신호 선택 유효성 검사 ❤️
                 List<TrafficLightSignal> selected = new ArrayList<>();
                 for (CheckBox cb : signalCheckBoxes) {
                     if (cb.isSelected()) selected.add(TrafficLightSignal.valueOf(cb.getText()));
@@ -167,12 +162,11 @@ public class SignalCycleEditorController {
                     return;
                 }
 
-                // 모든 검사를 통과하면 업데이트!
-                tempPhases.set(idx, new SignalSetting(selected.toArray(new TrafficLightSignal[0]), ticks));
+                tempPhases.set(idx, new SignalSetting(selected.toArray(new TrafficLightSignal[0]), seconds));
                 phaseListView.refresh();
                 
             } catch (NumberFormatException e) {
-                showAlert("Invalid Input", "Please enter a valid number for ticks.");
+                showAlert("Invalid Input", "Please enter a valid number for seconds.");
             }
         }
     }

@@ -28,12 +28,11 @@ public class SignalCycleEditor {
     public SignalCycleEditor(TrafficLight tl, Runnable onSave) {
         this.trafficLight = tl;
         this.onSave = onSave;
-        
-        // 현재 신호등이 가진 루프 정보를 복사해서 리스트로 만듦
-        // (직접 수정하면 Cancel 했을 때 곤란하니까! ❤️)
         this.phases = FXCollections.observableArrayList();
-        // 기존 신호등의 내부 리스트에 접근하기 위해 리플렉션을 쓰거나 getter가 필요함
-        // 일단 TrafficLight에 signalTime getter가 있다고 가정하고 진행할게!
+        
+        if (tl.getSignalTime() != null) {
+            phases.addAll(tl.getSignalTime());
+        }
     }
 
     public void show() {
@@ -54,7 +53,8 @@ public class SignalCycleEditor {
                 if (empty || item == null) setText(null);
                 else {
                     String signals = Arrays.toString(item.trafficLightSignals());
-                    setText(String.format("Phase %d: %s (%d ticks)", getIndex() + 1, signals, item.tick()));
+                    // 틱 대신 초 단위로 표시 ❤️
+                    setText(String.format("Phase %d: %s (%.1f sec)", getIndex() + 1, signals, item.durationSeconds()));
                 }
             }
         });
@@ -64,7 +64,7 @@ public class SignalCycleEditor {
         editorArea.setPadding(new Insets(0, 0, 0, 15));
         editorArea.setAlignment(Pos.TOP_LEFT);
 
-        Label durationLabel = new Label("Duration (Ticks):");
+        Label durationLabel = new Label("Duration (Seconds):"); // Ticks -> Seconds ❤️
         TextField durationField = new TextField();
         
         Label signalsLabel = new Label("Select Signals for this Phase:");
@@ -85,7 +85,7 @@ public class SignalCycleEditor {
         // 리스트 선택 시 편집기에 정보 로드
         listView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             if (newV != null) {
-                durationField.setText(String.valueOf(newV.tick()));
+                durationField.setText(String.valueOf(newV.durationSeconds()));
                 List<TrafficLightSignal> currentSignals = Arrays.asList(newV.trafficLightSignals());
                 for (CheckBox cb : checkBoxes) {
                     cb.setSelected(currentSignals.contains(TrafficLightSignal.valueOf(cb.getText())));
@@ -101,17 +101,17 @@ public class SignalCycleEditor {
             int idx = listView.getSelectionModel().getSelectedIndex();
             if (idx != -1) {
                 try {
-                    int ticks = Integer.parseInt(durationField.getText());
+                    // int -> double 변환 ❤️
+                    double seconds = Double.parseDouble(durationField.getText());
                     List<TrafficLightSignal> selected = new ArrayList<>();
                     for (CheckBox cb : checkBoxes) {
                         if (cb.isSelected()) selected.add(TrafficLightSignal.valueOf(cb.getText()));
                     }
-                    if (selected.isEmpty()) selected.add(TrafficLightSignal.RED); // 기본값
+                    if (selected.isEmpty()) selected.add(TrafficLightSignal.RED); 
 
-                    phases.set(idx, new SignalSetting(selected.toArray(new TrafficLightSignal[0]), ticks));
+                    phases.set(idx, new SignalSetting(selected.toArray(new TrafficLightSignal[0]), seconds));
                     listView.refresh();
                 } catch (NumberFormatException ex) {
-                    // 에러 처리는 자기를 위해 생략(?) ❤️
                 }
             }
         });
@@ -123,7 +123,7 @@ public class SignalCycleEditor {
         Button delBtn = new Button("Remove Phase");
         listControls.getChildren().addAll(addBtn, delBtn);
 
-        addBtn.setOnAction(e -> phases.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 10)));
+        addBtn.setOnAction(e -> phases.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 3.0))); // 기본 3초 ❤️
         delBtn.setOnAction(e -> {
             int idx = listView.getSelectionModel().getSelectedIndex();
             if (idx != -1) phases.remove(idx);

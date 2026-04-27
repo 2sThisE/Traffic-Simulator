@@ -3,6 +3,7 @@ package com.trafficsimulator.road.trafficlight;
 import java.awt.geom.Point2D;
 import java.util.*;
 import com.trafficsimulator.road.Lane;
+import com.trafficsimulator.util.GlobalTimer;
 
 public class TrafficLight {
     private Set<Lane> controlLaneList=new HashSet<>();
@@ -22,7 +23,7 @@ public class TrafficLight {
     public TrafficLight() {
         // 처음부터 빨간불 신호 루프 하나는 넣어줌 (화면에 보이기 위해!)
         List<SignalSetting> defaultLoop = new ArrayList<>();
-        defaultLoop.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 10));
+        defaultLoop.add(new SignalSetting(new TrafficLightSignal[]{TrafficLightSignal.RED}, 3.0)); // 기본 3초 ❤️
         addSignalLoop(defaultLoop);
     }
 
@@ -118,14 +119,14 @@ public class TrafficLight {
         // 1. 순환 시 상태 리셋
         if (currentTick == 0) {
             currentSignalIndex = 0;
-            nextPhaseTick = signalTime.get(0).tick();
+            nextPhaseTick = GlobalTimer.secondsToTicks(signalTime.get(0).durationSeconds());
             return;
         }
 
         // 2. 현재 페이즈 종료 체크
         if (currentTick >= nextPhaseTick) {
             currentSignalIndex = (currentSignalIndex + 1) % signalTime.size();
-            nextPhaseTick += signalTime.get(currentSignalIndex).tick();
+            nextPhaseTick += GlobalTimer.secondsToTicks(signalTime.get(currentSignalIndex).durationSeconds());
         }
     }
 
@@ -166,14 +167,16 @@ public class TrafficLight {
         this.currentTick = 0;
         this.currentSignalIndex = 0;
         if (signalTime != null && !signalTime.isEmpty()) {
-            this.nextPhaseTick = signalTime.get(0).tick();
+            this.nextPhaseTick = GlobalTimer.secondsToTicks(signalTime.get(0).durationSeconds());
         } else {
             this.nextPhaseTick = 0;
         }
     }
 
     private void recalculateTotalTick() {
-        this.totalTick = signalTime.stream().mapToInt(SignalSetting::tick).sum();
+        this.totalTick = signalTime.stream()
+                .mapToInt(s -> GlobalTimer.secondsToTicks(s.durationSeconds()))
+                .sum();
         if (totalTick > 0) {
             this.currentTick %= totalTick;
             syncCursor();
@@ -187,7 +190,7 @@ public class TrafficLight {
     private void syncCursor() {
         int accumulated = 0;
         for (int i = 0; i < signalTime.size(); i++) {
-            accumulated += signalTime.get(i).tick();
+            accumulated += GlobalTimer.secondsToTicks(signalTime.get(i).durationSeconds());
             if (currentTick < accumulated) {
                 currentSignalIndex = i;
                 nextPhaseTick = accumulated;

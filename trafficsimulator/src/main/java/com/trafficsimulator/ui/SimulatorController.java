@@ -4,7 +4,9 @@ import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
+import com.trafficsimulator.road.trafficlight.TrafficLightController;
 import com.trafficsimulator.road.camera.Camera; // 추가 ❤️
+import com.trafficsimulator.util.GlobalTimer;
 
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
@@ -40,8 +42,8 @@ public class SimulatorController {
     private SelectionManager selectionManager;
     private PropertyManager propertyManager;
     private JunctionController junctionController;
-    private com.trafficsimulator.road.trafficlight.TrafficLightController trafficLightController;
-    private com.trafficsimulator.util.GlobalTimer globalTimer;
+    private TrafficLightController trafficLightController;
+    private GlobalTimer globalTimer;
     private RoadDrawingTool drawingTool;
     private RoadMoveTool moveTool;
     private RoadEditTool editTool;
@@ -61,13 +63,14 @@ public class SimulatorController {
         roadManager = new RoadManager();
         selectionManager = new SelectionManager();
         junctionController = new JunctionController();
-        trafficLightController = new com.trafficsimulator.road.trafficlight.TrafficLightController();
+        trafficLightController = new TrafficLightController();
         
-        globalTimer = new com.trafficsimulator.util.GlobalTimer(1.0);
+        globalTimer = new GlobalTimer();
         globalTimer.addTickListener(trafficLightController);
         globalTimer.addTickListener(() -> {
             javafx.application.Platform.runLater(() -> {
-                tickLabel.setText("Ticks: " + globalTimer.getTotalTicks());
+                double seconds = com.trafficsimulator.util.GlobalTimer.ticksToSeconds(globalTimer.getTotalTicks());
+                tickLabel.setText(String.format("Time: %.1fs", seconds));
                 requestRender();
             });
         });
@@ -146,7 +149,7 @@ public class SimulatorController {
         for (TrafficLight tl : roadManager.getTrafficLightList()) {
             tl.resetCurrentTick();
         }
-        tickLabel.setText("Ticks: 0");
+        tickLabel.setText("Time: 0.0s");
         requestRender();
     }
 

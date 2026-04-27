@@ -51,6 +51,18 @@ public class RoadManager {
     }
 
     /**
+     * 특정 차선이 속해 있는 도로 객체를 반환합니다. ❤️
+     */
+    public Road findRoadByLane(Lane lane) {
+        for (Road road : roadList) {
+            if (road.getLaneList().contains(lane)) {
+                return road;
+            }
+        }
+        return null;
+    }
+
+    /**
      * 특정 좌표 근처에 카메라가 있는지 확인합니다. ❤️
      */
     public Camera findCameraHit(Point2D.Double worldPt, double threshold) {
