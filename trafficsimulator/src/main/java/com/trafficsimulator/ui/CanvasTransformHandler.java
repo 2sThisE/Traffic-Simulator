@@ -54,7 +54,7 @@ public class CanvasTransformHandler {
     }
 
     public void handleMouseDragged(MouseEvent e) {
-        if (e.getButton() == MouseButton.SECONDARY) { // 오른쪽 클릭 드래그일 때만 이동
+        if (e.isSecondaryButtonDown()) { // 오른쪽 클릭 드래그일 때만 이동
             double deltaX = e.getSceneX() - lastMouseX;
             double deltaY = e.getSceneY() - lastMouseY;
 

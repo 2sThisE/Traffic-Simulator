@@ -1,12 +1,19 @@
 package com.trafficsimulator.ui;
 
+import java.awt.geom.Point2D;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+import com.trafficsimulator.debug.Vehicle;
 import com.trafficsimulator.road.JunctionController;
-import com.trafficsimulator.road.Lane;
+import com.trafficsimulator.road.Lane; // 추가 ❤️
 import com.trafficsimulator.road.Road;
+import com.trafficsimulator.road.camera.Camera;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightController;
-import com.trafficsimulator.road.camera.Camera; // 추가 ❤️
 import com.trafficsimulator.util.GlobalTimer;
+import com.trafficsimulator.util.Navigate;
 
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
@@ -18,10 +25,6 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
-import javafx.geometry.Insets;
-import javafx.scene.input.MouseEvent;
-
-import java.awt.geom.Point2D;
 
 public class SimulatorController {
 
@@ -51,8 +54,10 @@ public class SimulatorController {
     private KeyboardHandler keyboardHandler;
     private CanvasTransformHandler transformHandler;
 
+    private List<Vehicle> vehicles = new ArrayList<>(); 
     private boolean isSimulationRunning = false; 
     private boolean isDraggingObject = false; // 신호등/카메라 드래그용 ❤️
+    private boolean isDraggingVehicle = false; // 차량 드래그용 추가
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
@@ -153,7 +158,7 @@ public class SimulatorController {
         requestRender();
     }
 
-    private void refreshAllConnections() {
+    public void refreshAllConnections() {
         for (Road road : roadManager.getRoadList()) {
             for (Lane lane : road.getLaneList()) {
                 junctionController.refreshConnections(lane);
@@ -196,12 +201,44 @@ public class SimulatorController {
 
         mainCanvas.setOnMousePressed(e -> {
             mainCanvas.requestFocus();
-            if (isSimulationRunning) {
-                transformHandler.handleMousePressed(e);
-                return;
-            }
             Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
+
             if (e.getButton() == MouseButton.PRIMARY) {
+                // 1. 차량 체크 (디버그/시뮬레이션 모드 모두 가능)
+                Vehicle vHit = findVehicleHit(worldPt);
+                if (vHit != null) {
+                    selectionManager.selectVehicle(vHit);
+                    isDraggingVehicle = true;
+
+                    // 더블 클릭 시 현재 위치에서 가장 가까운 차선을 찾아 경로 자동 생성 ❤️
+                    if (e.getClickCount() == 2) {
+                        RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                        if (hit.lane != null) {
+                            // 차선 중앙으로 위치 스냅
+                            vHit.snapToNearestPoint(worldPt, junctionController); 
+                            
+                            // 목적지까지의 경로 계산
+                            List<Set<Lane>> route = Navigate.calculateRoute(hit.lane, roadManager, junctionController);
+                            if (route != null) {
+                                vHit.setLogicalRoute(route); // 논리적 경로 정보 추가 저장 ❤️
+                                vHit.setCurrentPhaseIndex(0);
+                                vHit.updateDynamicPath(junctionController); // 동적 베지어 경로 생성 ❤️
+                                statusLabel.setText("Vehicle path updated! Drag to move along the path.");
+                            } else {
+                                statusLabel.setText("No path found from this lane.");
+                            }
+                        }
+                    }
+                    
+                    requestRender();
+                    return;
+                }
+
+                if (isSimulationRunning) {
+                    transformHandler.handleMousePressed(e);
+                    return;
+                }
+
                 boolean shiftDown = e.isShiftDown();
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMousePressed(e, "Road", cameraX, cameraY, zoomFactor);
@@ -271,12 +308,21 @@ public class SimulatorController {
         });
 
         mainCanvas.setOnMouseDragged(e -> {
-            if (isSimulationRunning) {
-                transformHandler.handleMouseDragged(e);
-                return;
-            }
             Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
-            if (e.getButton() == MouseButton.PRIMARY) {
+            if (e.isPrimaryButtonDown()) {
+                if (isDraggingVehicle && selectionManager.getSelectedVehicle() != null) {
+                    Vehicle v = selectionManager.getSelectedVehicle();
+                    v.snapToNearestPoint(worldPt, junctionController);
+                    v.updateDynamicPath(junctionController); // 실시간 동적 경로 갱신 ❤️
+                    requestRender();
+                    return;
+                }
+
+                if (isSimulationRunning) {
+                    transformHandler.handleMouseDragged(e);
+                    return;
+                }
+
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMouseDragged(e, cameraX, cameraY, zoomFactor);
                 } else if (editTool.isEditing()) {
@@ -300,24 +346,52 @@ public class SimulatorController {
         });
 
         mainCanvas.setOnMouseReleased(e -> {
-            if (isSimulationRunning) return;
             if (e.getButton() == MouseButton.PRIMARY) {
+                isDraggingVehicle = false;
+                if (isSimulationRunning) return;
+                
                 if (modeManager.getMode() == EditorMode.DRAW_ROAD) {
                     drawingTool.handleMouseReleased(e, cameraX, cameraY, zoomFactor);
                 }
                 editTool.stopEditing();
                 moveTool.stopMoving();
                 isDraggingObject = false;
+
+                // 도로 생성/수정 후 전체 연결 데이터 갱신 ❤️
+                roadManager.refreshStaticObjectPositions();
+                refreshAllConnections();
             }
             requestRender();
         });
     }
 
-    private void requestRender() {
+    private Vehicle findVehicleHit(Point2D.Double worldPt) {
+        for (Vehicle v : vehicles) {
+            double dx = v.getX() - worldPt.x;
+            double dy = v.getY() - worldPt.y;
+            // 차량 크기 기반 히트 박스 (반지름 30.0으로 확대 및 줌 대응)
+            if (Math.sqrt(dx*dx + dy*dy) < 30.0 / zoomFactor) {
+                return v;
+            }
+        }
+        return null;
+    }
+
+    public RoadManager getRoadManager() { return roadManager; }
+    public JunctionController getJunctionController() { return junctionController; }
+    public List<Vehicle> getVehicles() { return vehicles; }
+    public double getCameraX() { return cameraX; }
+    public double getCameraY() { return cameraY; }
+    public double getZoomFactor() { return zoomFactor; }
+    public Canvas getMainCanvas() { return mainCanvas; }
+    public RoadDrawingTool getDrawingTool() { return drawingTool; }
+
+    public void requestRender() {
         renderer.render(
             roadManager.getRoadList(),
             roadManager.getTrafficLightList(),
-            roadManager.getCameraList(), // 카메라 추가 ❤️
+            roadManager.getCameraList(),
+            vehicles, // 차량 리스트 전달
             drawingTool.getDragStart(),
             drawingTool.getCurrentMouse(),
             drawingTool.isDrawing(),

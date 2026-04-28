@@ -3,6 +3,7 @@ package com.trafficsimulator.road;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
+import com.trafficsimulator.util.UnitConverter;
 
 public class Road {
     private Point2D.Double startPoint;
@@ -16,7 +17,7 @@ public class Road {
     private double roadLength;
     private boolean isCurved;
     private List<Point2D.Double> pathPoints = new ArrayList<>();
-    private double laneWidth = 3.2*20; //3.2m * 20px
+    private double laneWidth = UnitConverter.toPixel(3.2); // 3.2m
 
 
     /**

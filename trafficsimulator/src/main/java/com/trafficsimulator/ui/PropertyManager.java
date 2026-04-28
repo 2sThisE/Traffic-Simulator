@@ -7,7 +7,9 @@ import com.trafficsimulator.road.LaneType;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
-import com.trafficsimulator.vehicle.VehicleType; // 정확하게 임포트! ❤️
+import com.trafficsimulator.util.Navigate;
+import com.trafficsimulator.vehicle.VehicleType;
+import com.trafficsimulator.debug.Vehicle;
 
 import javafx.collections.FXCollections;
 import javafx.fxml.FXMLLoader;
@@ -27,6 +29,7 @@ import javafx.stage.Stage;
 
 import java.awt.geom.Point2D;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +63,8 @@ public class PropertyManager {
             renderTrafficLightProperties(tl);
         } else if (selected instanceof Camera cam) { // 카메라 속성창 연결 ❤️
             renderCameraProperties(cam);
+        } else if (selected instanceof Vehicle vehicle) {
+            renderVehicleProperties(vehicle);
         } else if (selected instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Lane) {
             @SuppressWarnings("unchecked")
             List<Lane> lanes = (List<Lane>) list;
@@ -70,6 +75,85 @@ public class PropertyManager {
             }
         } else if (selected instanceof Lane lane) {
             renderLaneProperties(lane, parentRoad);
+        }
+    }
+
+    /**
+     * 차량 속성창을 렌더링합니다. ❤️
+     */
+    private void renderVehicleProperties(Vehicle vehicle) {
+        addTitle("Vehicle Properties");
+        
+        addInfo("Type", vehicle.getType().name());
+        addInfo("Position", String.format("%.1f, %.1f", vehicle.getX(), vehicle.getY()));
+        addProperty("Speed (km/h)", String.valueOf(vehicle.getSpeedKmh()), true, val -> {
+            try {
+                vehicle.setSpeedKmh(Double.parseDouble(val));
+            } catch (NumberFormatException e) {
+            }
+        });
+
+        addSeparator();
+        
+        // 1. 경로 지우기 버튼
+        Button clearPathBtn = new Button("Clear Current Path");
+        clearPathBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;");
+        clearPathBtn.setMaxWidth(Double.MAX_VALUE);
+        clearPathBtn.setOnAction(e -> {
+            vehicle.getPath().clear();
+            vehicle.getLogicalRoute().clear(); // 논리적 경로도 함께 지워야 자유로운 배치가 가능함 ❤️
+            onPropertyChanged.run();
+            updateProperties(vehicle, null);
+        });
+        grid.add(clearPathBtn, 0, grid.getRowCount(), 2, 1);
+
+        addSeparator();
+        
+        // 2. 가능한 경로 리스트 (현재 위치 기반)
+        addTitle("Available Routes from Current Lane");
+        
+        RoadManager.HitResult hit = roadManager.findHit(new Point2D.Double(vehicle.getX(), vehicle.getY()));
+        if (hit.lane != null) {
+            List<List<Set<Lane>>> allRoutes = Navigate.calculateAllRoutes(hit.lane, roadManager, junctionController);
+            if (!allRoutes.isEmpty()) {
+                ListView<List<Set<Lane>>> listView = new ListView<>(FXCollections.observableArrayList(allRoutes));
+                listView.setPrefHeight(200);
+                listView.setCellFactory(lv -> new ListCell<>() {
+                    @Override protected void updateItem(List<Set<Lane>> item, boolean empty) {
+                        super.updateItem(item, empty);
+                        if (empty || item == null) {
+                            setText(null);
+                        } else {
+                            // 경로 요약 표시 (예: "Route 1: [Road A] -> [Road B]")
+                            StringBuilder sb = new StringBuilder("Route " + (getIndex() + 1) + ": ");
+                            for (int i = 0; i < item.size(); i++) {
+                                Set<Lane> phase = item.get(i);
+                                Lane l = phase.iterator().next();
+                                Road r = roadManager.findRoadByLane(l);
+                                if (r != null) {
+                                    sb.append(r.hashCode() % 100);
+                                    if (i < item.size() - 1) sb.append(" -> ");
+                                }
+                            }
+                            setText(sb.toString());
+                        }
+                    }
+                });
+                
+                listView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+                    if (newV != null) {
+                        List<Point2D.Double> pathPoints = Navigate.generateTotalPathPoints(newV, junctionController);
+                        vehicle.setPath(pathPoints);
+                        vehicle.setLogicalRoute(newV); // 논리적 경로 정보 추가 저장 ❤️
+                        onPropertyChanged.run();
+                    }
+                });
+                grid.add(listView, 0, grid.getRowCount(), 2, 1);
+            } else {
+                grid.add(new Label("No routes found from this lane."), 0, grid.getRowCount(), 2, 1);
+            }
+        } else {
+            grid.add(new Label("Vehicle is not on any lane."), 0, grid.getRowCount(), 2, 1);
         }
     }
 

@@ -1,12 +1,14 @@
 package com.trafficsimulator.ui;
 
-import com.trafficsimulator.road.Lane;
-import com.trafficsimulator.road.Road;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
-import com.trafficsimulator.road.trafficlight.TrafficLight;
-import com.trafficsimulator.road.camera.Camera; // 추가 ❤️
+
+import com.trafficsimulator.road.Lane;
+import com.trafficsimulator.road.Road;
+import com.trafficsimulator.road.camera.Camera;
+import com.trafficsimulator.road.trafficlight.TrafficLight; // 추가 ❤️
+import com.trafficsimulator.util.UnitConverter;
 
 public class RoadManager {
     private final List<Road> roadList = new ArrayList<>();
@@ -48,6 +50,18 @@ public class RoadManager {
 
     public List<Camera> getCameraList() {
         return cameraList;
+    }
+
+    /**
+     * 특정 좌표 근처의 도로를 찾습니다. ❤️
+     */
+    public Road findRoadByPoint(Point2D.Double pt) {
+        for (Road road : roadList) {
+            if (pt.distance(road.getStartPoint()) < 20.0 || pt.distance(road.getEndPoint()) < 20.0) {
+                return road;
+            }
+        }
+        return null;
     }
 
     /**
@@ -148,7 +162,7 @@ public class RoadManager {
                 }
             }
             double centerDist = getDistanceToPath(worldPt, road.getPathPoints());
-            if (centerDist < 20.0) {
+            if (centerDist < UnitConverter.toPixel(1.0)) { // 1.0m threshold
                 bestRoad = road;
                 return new HitResult(bestRoad, null);
             }

@@ -1,5 +1,6 @@
 package com.trafficsimulator.ui;
 
+import com.trafficsimulator.debug.Vehicle;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.LaneConnection;
 import com.trafficsimulator.road.Road;
@@ -12,7 +13,8 @@ public class SelectionManager {
     private final List<Lane> selectedLanes = new ArrayList<>();
     private Road selectedRoad;
     private TrafficLight selectedTrafficLight;
-    private Camera selectedCamera; // 추가 ❤️
+    private Camera selectedCamera;
+    private Vehicle selectedVehicle; // 추가
     private Lane highlightedLane; 
     private LaneConnection selectedConnection;
     private Runnable onSelectionChanged;
@@ -28,24 +30,29 @@ public class SelectionManager {
     }
 
     public void selectTrafficLight(TrafficLight tl) {
-        this.selectedRoad = null;
-        this.selectedConnection = null;
-        this.selectedCamera = null;
+        clearSelection();
         this.selectedTrafficLight = tl;
         notifyChange();
     }
 
     public void selectCamera(Camera camera) {
-        this.selectedRoad = null;
-        this.selectedConnection = null;
-        this.selectedTrafficLight = null;
+        clearSelection();
         this.selectedCamera = camera;
+        notifyChange();
+    }
+
+    public void selectVehicle(Vehicle vehicle) {
+        clearSelection();
+        this.selectedVehicle = vehicle;
         notifyChange();
     }
 
     public void selectLane(Road road, Lane lane, boolean multiSelect) {
         this.selectedRoad = null;
         this.selectedConnection = null;
+        this.selectedTrafficLight = null;
+        this.selectedCamera = null;
+        this.selectedVehicle = null;
         
         if (!multiSelect) {
             selectedLanes.clear();
@@ -77,6 +84,7 @@ public class SelectionManager {
         this.selectedConnection = null;
         this.selectedTrafficLight = null;
         this.selectedCamera = null;
+        this.selectedVehicle = null;
         this.highlightedLane = null;
         notifyChange();
     }
@@ -91,7 +99,8 @@ public class SelectionManager {
     public List<Lane> getSelectedLanes() { return selectedLanes; }
     public LaneConnection getSelectedConnection() { return selectedConnection; }
     public TrafficLight getSelectedTrafficLight() { return selectedTrafficLight; }
-    public Camera getSelectedCamera() { return selectedCamera; } // 추가 ❤️
+    public Camera getSelectedCamera() { return selectedCamera; }
+    public Vehicle getSelectedVehicle() { return selectedVehicle; }
     
     public Lane getSelectedLane() {
         if (selectedLanes.isEmpty()) return null;
@@ -101,7 +110,8 @@ public class SelectionManager {
     public Object getSelectedObject() {
         if (selectedRoad != null) return selectedRoad;
         if (selectedTrafficLight != null) return selectedTrafficLight;
-        if (selectedCamera != null) return selectedCamera; // 우선순위 추가 ❤️
+        if (selectedCamera != null) return selectedCamera;
+        if (selectedVehicle != null) return selectedVehicle;
         if (!selectedLanes.isEmpty()) return selectedLanes;
         return null;
     }

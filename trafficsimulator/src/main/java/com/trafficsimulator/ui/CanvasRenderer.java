@@ -1,5 +1,12 @@
 package com.trafficsimulator.ui;
 
+import java.awt.geom.Point2D;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.trafficsimulator.debug.Vehicle;
 import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.LaneConnection;
@@ -7,17 +14,12 @@ import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.camera.Camera;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
+import com.trafficsimulator.util.UnitConverter;
 
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.StrokeLineCap;
-
-import java.awt.geom.Point2D;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 public class CanvasRenderer {
     private final Canvas canvas;
@@ -27,6 +29,7 @@ public class CanvasRenderer {
     }
 
     public void render(List<Road> roads, List<TrafficLight> trafficLights, List<Camera> cameras,
+                       List<Vehicle> vehicles,
                        Point2D.Double dragStart, Point2D.Double currentMouse, boolean isDrawing,
                        double cameraX, double cameraY, double zoom, SelectionManager selectionManager,
                        RoadManager.PointHit hoveredPoint, JunctionController junctionController) {
@@ -46,12 +49,22 @@ public class CanvasRenderer {
         // 2. 교차로 연결부 그리기
         drawJunctionConnections(gc, roads, junctionController, selectionManager, zoom);
 
-        // 3. 정적 객체들 그리기 ❤️
+        // 3. 차량 그리기
+        if (vehicles != null) {
+            for (Vehicle v : vehicles) {
+                drawVehicle(gc, v, selectionManager);
+                if (selectionManager.getSelectedVehicle() == v) {
+                    drawVehiclePath(gc, v, zoom);
+                }
+            }
+        }
+
+        // 4. 정적 객체들 그리기 ❤️
         drawRegisteredLanesHighlight(gc, roads, selectionManager, zoom);
         drawTrafficLights(gc, trafficLights, selectionManager, zoom);
-        drawCameras(gc, cameras, selectionManager, zoom); // 카메라 그리기 추가! ❤️
+        drawCameras(gc, cameras, selectionManager, zoom); 
 
-        // 4. 포인트 조절 핸들 그리기
+        // 5. 포인트 조절 핸들 그리기
         drawHandles(gc, roads, selectionManager, hoveredPoint, zoom);
 
         if (isDrawing && dragStart != null && currentMouse != null) {
@@ -62,6 +75,55 @@ public class CanvasRenderer {
             gc.setLineDashes(0);
         }
 
+        gc.restore();
+    }
+
+    private void drawVehicle(GraphicsContext gc, Vehicle v, SelectionManager sm) {
+        gc.save();
+        gc.translate(v.getX(), v.getY());
+        gc.rotate(v.getAngle());
+
+        double w = v.getWidth();
+        double h = v.getHeight();
+
+        // 선택 하이라이트
+        if (sm.getSelectedVehicle() == v) {
+            gc.setStroke(Color.CYAN);
+            gc.setLineWidth(2.0);
+            gc.strokeRect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4);
+        }
+
+        // Body (Rounded Rectangle)
+        gc.setFill(v.getColor());
+        gc.fillRoundRect(-w / 2, -h / 2, w, h, 8, 8);
+
+        // Headlights
+        gc.setFill(Color.YELLOW);
+        gc.fillOval(w / 2 - 5, -h / 2 + 2, 4, 4);
+        gc.fillOval(w / 2 - 5, h / 2 - 6, 4, 4);
+
+        // Taillights
+        gc.setFill(Color.RED);
+        gc.fillRect(-w / 2, -h / 2 + 3, 2, 3);
+        gc.fillRect(-w / 2, h / 2 - 6, 2, 3);
+
+        gc.restore();
+    }
+
+    /**
+     * 차량이 따라갈 경로를 점으로 그립니다.
+     */
+    private void drawVehiclePath(GraphicsContext gc, Vehicle v, double zoom) {
+        List<Point2D.Double> path = v.getPath();
+        if (path == null || path.isEmpty()) return;
+
+        gc.save();
+        gc.setFill(Color.WHITE.deriveColor(0, 1, 1, 0.5)); // 반투명 흰색
+        double dotSize = 3.0 / zoom;
+
+        for (Point2D.Double pt : path) {
+            gc.fillOval(pt.x - dotSize / 2, pt.y - dotSize / 2, dotSize, dotSize);
+        }
         gc.restore();
     }
 
@@ -151,7 +213,7 @@ public class CanvasRenderer {
         double nx = -dy / len;
         double ny = dx / len;
 
-        double halfWidth = 20.0; // 기본값
+        double halfWidth = UnitConverter.toPixel(3.2) / 2.0; // 기본값 (3.2m / 2)
         // 실제 차선 너비를 찾기 위한 도로 검색 (최적화 가능)
         // 여기서는 시각적인 효과를 위해 고정 너비를 쓰거나 파라미터로 받을 수 있음
 
