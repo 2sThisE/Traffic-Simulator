@@ -55,6 +55,7 @@ public class CanvasRenderer {
                 drawVehicle(gc, v, selectionManager);
                 if (selectionManager.getSelectedVehicle() == v) {
                     drawVehiclePath(gc, v, zoom);
+                    drawVehicleVision(gc, v, zoom); // 감지 영역 그리기 추가 ❤️
                 }
             }
         }
@@ -123,6 +124,45 @@ public class CanvasRenderer {
 
         for (Point2D.Double pt : path) {
             gc.fillOval(pt.x - dotSize / 2, pt.y - dotSize / 2, dotSize, dotSize);
+        }
+        gc.restore();
+    }
+
+    /**
+     * 차량의 감지 영역을 시각화합니다. ❤️
+     */
+    private void drawVehicleVision(GraphicsContext gc, Vehicle v, double zoom) {
+        List<Point2D.Double> vision = v.getVisionArea();
+        if (vision == null || vision.isEmpty()) return;
+
+        gc.save();
+        gc.setFill(Color.web("#3498db", 0.15)); 
+        gc.setStroke(Color.web("#3498db", 0.4));
+        gc.setLineWidth(1.0 / zoom);
+
+        boolean isNewPolygon = true;
+        for (Point2D.Double pt : vision) {
+            if (pt == null) {
+                if (!isNewPolygon) {
+                    gc.closePath();
+                    gc.fill();
+                    gc.stroke();
+                }
+                isNewPolygon = true;
+            } else {
+                if (isNewPolygon) {
+                    gc.beginPath();
+                    gc.moveTo(pt.x, pt.y);
+                    isNewPolygon = false;
+                } else {
+                    gc.lineTo(pt.x, pt.y);
+                }
+            }
+        }
+        if (!isNewPolygon) {
+            gc.closePath();
+            gc.fill();
+            gc.stroke();
         }
         gc.restore();
     }

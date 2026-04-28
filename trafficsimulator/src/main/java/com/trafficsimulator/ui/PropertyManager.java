@@ -8,6 +8,7 @@ import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
 import com.trafficsimulator.util.Navigate;
+import com.trafficsimulator.util.UnitConverter;
 import com.trafficsimulator.vehicle.VehicleType;
 import com.trafficsimulator.debug.Vehicle;
 
@@ -367,7 +368,8 @@ public class PropertyManager {
     private void renderRoadProperties(Road road) {
         addTitle("Road Properties");
         
-        addInfo("Total Length", String.format("%.1f px", road.getRoadLength()));
+        double lengthKm = UnitConverter.toMeter(road.getRoadLength()) / 1000.0;
+        addInfo("Total Length", String.format("%.3f km", lengthKm));
         
         addProperty("Speed Limit (km/h)", String.valueOf(road.getLimitSpeed()), true, val -> {
             try {
@@ -440,7 +442,8 @@ public class PropertyManager {
     private void renderLaneProperties(Lane lane, Road road) {
         addTitle("Lane Properties");
         
-        addInfo("Length", String.format("%.1f px", lane.getLaneLength()));
+        double lengthKm = UnitConverter.toMeter(lane.getLaneLength()) / 1000.0;
+        addInfo("Length", String.format("%.3f km", lengthKm));
 
         CheckBox dirCb = new CheckBox("Direction (Up)");
         dirCb.setSelected(lane.isRoadDirection());

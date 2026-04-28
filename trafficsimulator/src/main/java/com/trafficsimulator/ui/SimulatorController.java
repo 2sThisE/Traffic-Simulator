@@ -223,6 +223,7 @@ public class SimulatorController {
                                 vHit.setLogicalRoute(route); // 논리적 경로 정보 추가 저장 ❤️
                                 vHit.setCurrentPhaseIndex(0);
                                 vHit.updateDynamicPath(junctionController); // 동적 베지어 경로 생성 ❤️
+                                vHit.updateVisionArea(roadManager, junctionController); // 감지 영역 업데이트 ❤️
                                 statusLabel.setText("Vehicle path updated! Drag to move along the path.");
                             } else {
                                 statusLabel.setText("No path found from this lane.");
@@ -314,6 +315,7 @@ public class SimulatorController {
                     Vehicle v = selectionManager.getSelectedVehicle();
                     v.snapToNearestPoint(worldPt, junctionController);
                     v.updateDynamicPath(junctionController); // 실시간 동적 경로 갱신 ❤️
+                    v.updateVisionArea(roadManager, junctionController); // 감지 영역 실시간 업데이트 ❤️
                     requestRender();
                     return;
                 }
@@ -333,7 +335,7 @@ public class SimulatorController {
                     roadManager.refreshStaticObjectPositions();
                 } else if (isDraggingObject) {
                     if (selectionManager.getSelectedTrafficLight() != null) {
-                        selectionManager.getSelectedTrafficLight().setCoordinates(worldPt);
+                        // 신호등 드래그 이동 비활성화 ❤️
                     } else if (selectionManager.getSelectedCamera() != null) {
                         // 자석처럼 도로 위 스냅! ❤️
                         Point2D.Double snapped = roadManager.findNearestPointOnAnyRoad(worldPt);
