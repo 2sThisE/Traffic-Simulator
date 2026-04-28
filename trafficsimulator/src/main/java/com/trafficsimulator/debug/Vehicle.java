@@ -77,8 +77,8 @@ public class Vehicle {
     /**
      * 오토파일럿 로직을 통해 감지 영역을 업데이트합니다. ❤️
      */
-    public void updateVisionArea(RoadManager roadManager, JunctionController junctionController) {
-        autopilot.updateVisionArea(roadManager, junctionController);
+    public void updateVisionArea(RoadManager roadManager, JunctionController junctionController, List<Vehicle> vehicles) {
+        autopilot.updateVisionArea(roadManager, junctionController, vehicles);
     }
 
     /**

@@ -49,7 +49,7 @@ public class Autopilot {
     /**
      * 차량의 감지 영역(Vision Area)을 계산합니다.
      */
-    public void updateVisionArea(RoadManager roadManager, JunctionController junctionController) {
+    public void updateVisionArea(RoadManager roadManager, JunctionController junctionController, List<Vehicle> allVehicles) {
         forwardVisionArea.clear();
         sideVisionArea.clear();
         vehicleVisionArea.clear();
@@ -85,11 +85,9 @@ public class Autopilot {
         double halfWidth = (laneWidthPx - UnitConverter.toPixel(0.4)) / 2.0;
 
         // 1. 전방 감지 영역 (신호등, 카메라용) ❤️
-        // 변경 가능한 모든 차선 영역 생성
         Area forwardLanesArea = new Area();
         buildLanesArea(forwardLanesArea, forwardTargetLanes, currentPhaseIndex, junctionController, halfWidth);
         
-        // Raycast용으로 여유가 있는 넓은 차선 영역 생성 (차량이 경계에 살짝 걸쳐서 눈이 멀어버리는 현상 방지 ❤️)
         Area raycastArea = new Area();
         buildLanesArea(raycastArea, forwardTargetLanes, currentPhaseIndex, junctionController, laneWidthPx / 2.0 + UnitConverter.toPixel(0.5));
 
@@ -98,15 +96,13 @@ public class Autopilot {
         double cos = Math.cos(rad);
         double sin = Math.sin(rad);
         
-        // 차량의 앞부분 좌표 계산
         Point2D.Double frontPos = new Point2D.Double(
             vehicle.getX() + cos * (vehicle.getWidth() / 2.0),
             vehicle.getY() + sin * (vehicle.getWidth() / 2.0)
         );
 
-        // 오빠가 말한대로 직진으로 300m 쏘면서 차선의 끝 경계 찾기! ❤️
         double actualRadiusPx = maxDistPx;
-        double stepPx = UnitConverter.toPixel(1.0); // 1미터 간격 정밀 탐색
+        double stepPx = UnitConverter.toPixel(1.0); 
         boolean inside = false;
         
         for (double d = 0; d <= maxDistPx; d += stepPx) {
@@ -116,17 +112,13 @@ public class Autopilot {
             if (raycastArea.contains(tx, ty)) {
                 inside = true;
             } else if (inside) {
-                // 차선 안에 있다가 밖으로 나가는 순간이 바로 끝 경계야!
                 actualRadiusPx = d;
                 break;
             }
         }
 
-        // 끝 경계까지의 거리를 반지름으로 120도 부채꼴 그리기! ❤️
         Path2D.Double arcMask = createConeMask(frontPos, vehicle.getAngle(), actualRadiusPx, 120.0);
         Area forwardVision = new Area(arcMask);
-        
-        // 그 결과를 다시 변경가능한 모든 차선만 감지되도록 다시 자르기! ❤️
         forwardVision.intersect(forwardLanesArea);
         fillVisionList(forwardVisionArea, forwardVision);
 
@@ -139,7 +131,31 @@ public class Autopilot {
             double startOffset = vehicleHalfLength - sideMaxDist;
             double endOffset = vehicleHalfLength;
             
-            List<Point2D.Double> subPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
+            // 측방 차량 감지 및 범위 축소 로직 ❤️
+            double adjustedMaxDist = sideMaxDist;
+            for (Vehicle other : allVehicles) {
+                if (other == vehicle) continue;
+                Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+                RoadManager.HitResult otherHit = roadManager.findHit(otherPos);
+                if (otherHit.lane == lane) {
+                    // 차량이 측방 감지 경로상에 있는지 확인
+                    List<Point2D.Double> testPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
+                    if (testPath != null && testPath.size() >= 2) {
+                        for (int i = 0; i < testPath.size() - 1; i++) {
+                            double dSq = getDistanceSqToSegment(testPath.get(i), testPath.get(i + 1), otherPos);
+                            if (dSq < (laneWidthPx * laneWidthPx / 4.0)) {
+                                // 감지됨! 거리에 맞춰 범위 축소
+                                double dist = p0.distance(otherPos) - other.getWidth() / 2.0;
+                                if (dist < adjustedMaxDist) {
+                                    adjustedMaxDist = Math.max(0, dist);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            List<Point2D.Double> subPath = getLaneSubPath(lane, p0, vehicleHalfLength - adjustedMaxDist, endOffset, junctionController);
             if (subPath != null && subPath.size() >= 2) {
                 addPathToArea(sideVision, subPath, halfWidth);
             }
@@ -148,11 +164,34 @@ public class Autopilot {
 
         // 3. 전방 차량 감지 영역 (도로 굴곡 추적 방식) ❤️
         double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh());
-        safetyDistM = Math.min(safetyDistM, 100.0); // 최대 100m 제한
+        safetyDistM = Math.min(safetyDistM, 100.0); 
         double safetyDistPx = UnitConverter.toPixel(safetyDistM);
         
-        // 경로 추적을 통해 안전거리만큼의 포인트 리스트 생성
-        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, p0, safetyDistPx, currentPhaseIndex, junctionController);
+        // 전방 차량 감지 및 범위 축소 로직 ❤️
+        double adjustedSafetyDistPx = safetyDistPx;
+        for (Vehicle other : allVehicles) {
+            if (other == vehicle) continue;
+            Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+            
+            // 임시로 전체 경로를 추적해서 해당 차량이 내 경로 위에 있는지 확인 (앞부분 frontPos 기준 시작! ❤️)
+            List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, safetyDistPx, currentPhaseIndex, junctionController);
+            if (fullTraced != null && fullTraced.size() >= 2) {
+                for (int i = 0; i < fullTraced.size() - 1; i++) {
+                    double dSq = getDistanceSqToSegment(fullTraced.get(i), fullTraced.get(i + 1), otherPos);
+                    // 차선 너비 내에 있으면 같은 차선으로 간주
+                    if (dSq < (laneWidthPx * laneWidthPx / 4.0)) {
+                        // 거리 계산도 앞부분 frontPos 기준으로 변경해서 더 정확하게! ❤️
+                        double dist = frontPos.distance(otherPos) - other.getWidth() / 2.0;
+                        if (dist < adjustedSafetyDistPx) {
+                            adjustedSafetyDistPx = Math.max(0, dist);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 최종 감지 영역 생성도 frontPos 기준! ❤️
+        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, frontPos, adjustedSafetyDistPx, currentPhaseIndex, junctionController);
         
         Area vehicleVision = new Area();
         if (tracedPath != null && tracedPath.size() >= 2) {
