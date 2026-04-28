@@ -234,8 +234,8 @@ public class SimulatorController {
                             if (route != null) {
                                 vHit.setLogicalRoute(route); // 논리적 경로 정보 추가 저장 ❤️
                                 vHit.setCurrentPhaseIndex(0);
-                                vHit.updateDynamicPath(junctionController); // 동적 베지어 경로 생성 ❤️
-                                vHit.updateVisionArea(roadManager, junctionController, vehicles); // 감지 영역 업데이트 ❤️
+                                vHit.updateVisionArea(roadManager, junctionController, vehicles); // 감지 영역 먼저 업데이트 ❤️
+                                vHit.updateDynamicPath(junctionController,vehicles); // 업데이트된 감지 영역 기반 동적 경로 생성 ❤️
                                 statusLabel.setText("Vehicle path updated! Drag to move along the path.");
                             } else {
                                 statusLabel.setText("No path found from this lane.");
@@ -284,7 +284,7 @@ public class SimulatorController {
                         List<Set<Lane>> route = Navigate.calculateRoute(hit.lane, roadManager, junctionController);
                         if (route != null) {
                             car.setLogicalRoute(route);
-                            car.updateDynamicPath(junctionController);
+                            car.updateDynamicPath(junctionController,vehicles);
                             car.updateVisionArea(roadManager, junctionController, vehicles);
                         }
                         
@@ -344,7 +344,7 @@ public class SimulatorController {
                 if (isDraggingVehicle && selectionManager.getSelectedVehicle() != null) {
                     Vehicle v = selectionManager.getSelectedVehicle();
                     v.snapToNearestPoint(worldPt, junctionController);
-                    v.updateDynamicPath(junctionController); // 실시간 동적 경로 갱신 ❤️
+                    v.updateDynamicPath(junctionController,vehicles); // 실시간 동적 경로 갱신 ❤️
                     
                     // 모든 차량의 감지 영역 실시간 업데이트 (한 차량의 이동이 다른 차량의 감지 범위에 영향을 줄 수 있음) ❤️
                     for (Vehicle allV : vehicles) {

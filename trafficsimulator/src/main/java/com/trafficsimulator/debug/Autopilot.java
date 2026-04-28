@@ -29,6 +29,7 @@ public class Autopilot {
     private List<Point2D.Double> forwardVisionArea = new ArrayList<>(); // 전방 감지 영역 (신호등, 카메라 등) ❤️
     private List<Point2D.Double> sideVisionArea = new ArrayList<>();    // 측방 감지 영역 (타 차량 등) ❤️
     private List<Point2D.Double> vehicleVisionArea = new ArrayList<>(); // 전방 차량 감지 영역 (안전거리 기반) ❤️
+    private Area lastSideVisionArea = new Area(); // 측방 감지 영역(Area 객체) 저장용 ❤️
 
     public Autopilot(Vehicle vehicle) {
         this.vehicle = vehicle;
@@ -199,6 +200,7 @@ public class Autopilot {
             }
         }
         fillVisionList(sideVisionArea, sideVision);
+        this.lastSideVisionArea = sideVision; // 측방 감지 영역 저장 ❤️
 
         // 3. 전방 차량 감지 영역 (도로 굴곡 추적 방식) ❤️
         double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh());
@@ -733,10 +735,55 @@ public class Autopilot {
         }
 
         Lane stepTargetLane = findStepTargetLane(currentPhase, currentLane, targetLane);
+        double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
+
+        // --- 측방 충돌 방지 로직 (감지된 영역 자체를 가져다가 직접 사용) ❤️ ---
+        if (stepTargetLane != currentLane && lastSideVisionArea != null) {
+            double minLookahead = UnitConverter.toPixel(15.0); // 안전한 차선 변경을 위한 최소 거리
+            double safeLimit = 0;
+            double checkStep = UnitConverter.toPixel(1.0); // 2m 간격으로 점검
+            
+            // 목표 차선을 따라 점들을 추출하여 안전 영역(lastSideVisionArea) 내부에 있는지 직접 검사
+            List<Point2D.Double> checkPath = getLaneSubPath(stepTargetLane, p0, 0, lookaheadDist, junctionController);
+            if (checkPath != null && checkPath.size() >= 2) {
+                double accumulated = 0;
+                boolean blocked = false;
+                for (int i = 0; i < checkPath.size() - 1; i++) {
+                    Point2D.Double p1 = checkPath.get(i);
+                    Point2D.Double p2 = checkPath.get(i + 1);
+                    double dist = p1.distance(p2);
+                    
+                    int steps = (int) Math.max(1, Math.ceil(dist / checkStep));
+                    for(int s = 0; s <= steps; s++) {
+                        double ratio = s / (double)steps;
+                        double cx = p1.x + (p2.x - p1.x) * ratio;
+                        double cy = p1.y + (p2.y - p1.y) * ratio;
+                        
+                        // 현재 점이 측방 감지 영역(안전 지대) 바깥이라면 막힌 것으로 간주!
+                        if (!lastSideVisionArea.contains(cx, cy)) {
+                            blocked = true;
+                            break;
+                        }
+                        safeLimit = accumulated + dist * ratio;
+                    }
+                    if (blocked) break;
+                    accumulated += dist;
+                }
+                
+                if (blocked && safeLimit < minLookahead) {
+                    stepTargetLane = currentLane; // 변경 공간이 부족하면 변경 취소 (직진)
+                } else if (blocked) {
+                    lookaheadDist = Math.min(lookaheadDist, safeLimit); // 안전한 곳까지만 경로 생성
+                }
+            } else {
+                stepTargetLane = currentLane;
+            }
+        }
+        // ------------------------------------------------
+
         List<Point2D.Double> lanePoints = stepTargetLane.getLanePath();
         if (lanePoints == null || lanePoints.size() < 2) return;
 
-        double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
         List<Point2D.Double> orderedPoints = new ArrayList<>(lanePoints);
         if (!stepTargetLane.isRoadDirection()) Collections.reverse(orderedPoints);
 

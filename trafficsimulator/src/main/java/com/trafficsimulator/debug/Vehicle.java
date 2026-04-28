@@ -98,7 +98,7 @@ public class Vehicle {
     /**
      * 동적인 주행 경로를 업데이트합니다. ❤️
      */
-    public void updateDynamicPath(JunctionController junctionController) {
+    public void updateDynamicPath(JunctionController junctionController, List<Vehicle> vehicles) {
         autopilot.updateDynamicPath(junctionController);
     }
 
