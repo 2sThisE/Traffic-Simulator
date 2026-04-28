@@ -132,12 +132,22 @@ public class CanvasRenderer {
      * 차량의 감지 영역을 시각화합니다. ❤️
      */
     private void drawVehicleVision(GraphicsContext gc, Vehicle v, double zoom) {
-        List<Point2D.Double> vision = v.getVisionArea();
+        // 1. 전방 감지 영역 (신호등, 카메라 등) - 노란색 ❤️
+        drawVisionPolygon(gc, v.getForwardVisionArea(), Color.web("#f1c40f", 0.2), Color.web("#f1c40f", 0.5), zoom);
+        
+        // 2. 측방 감지 영역 (타 차량 등) - 하늘색 ❤️
+        drawVisionPolygon(gc, v.getSideVisionArea(), Color.web("#3498db", 0.15), Color.web("#3498db", 0.4), zoom);
+
+        // 3. 전방 차량 감지 영역 (안전거리) - 하늘색 (측방과 동일) ❤️
+        drawVisionPolygon(gc, v.getVehicleVisionArea(), Color.web("#3498db", 0.15), Color.web("#3498db", 0.4), zoom);
+    }
+
+    private void drawVisionPolygon(GraphicsContext gc, List<Point2D.Double> vision, Color fill, Color stroke, double zoom) {
         if (vision == null || vision.isEmpty()) return;
 
         gc.save();
-        gc.setFill(Color.web("#3498db", 0.15)); 
-        gc.setStroke(Color.web("#3498db", 0.4));
+        gc.setFill(fill);
+        gc.setStroke(stroke);
         gc.setLineWidth(1.0 / zoom);
 
         boolean isNewPolygon = true;

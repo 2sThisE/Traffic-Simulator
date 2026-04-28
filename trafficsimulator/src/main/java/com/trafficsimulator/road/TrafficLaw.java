@@ -89,4 +89,17 @@ public class TrafficLaw {
         
         return currentSpeed > limit;
     }
+
+    /**
+     * 대한민국 도로교통공단 권장 안전거리(m)를 계산합니다. ❤️
+     * - 일반도로(80km/h 미만): 속도(km/h) - 15
+     * - 고속도로/고속주행(80km/h 이상): 속도(km/h)와 동일한 거리
+     */
+    public static double getRecommendedSafetyDistance(double speedKmh) {
+        if (speedKmh < 80) {
+            return Math.max(5.0, speedKmh - 15.0); // 최소 5m 보장
+        } else {
+            return speedKmh; 
+        }
+    }
 }

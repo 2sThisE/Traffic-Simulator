@@ -371,8 +371,8 @@ public class SimulatorController {
         for (Vehicle v : vehicles) {
             double dx = v.getX() - worldPt.x;
             double dy = v.getY() - worldPt.y;
-            // 차량 크기 기반 히트 박스 (반지름 30.0으로 확대 및 줌 대응)
-            if (Math.sqrt(dx*dx + dy*dy) < 30.0 / zoomFactor) {
+            // 차량 크기 기반 히트 박스 (줌 보정 제거) ❤️
+            if (Math.sqrt(dx*dx + dy*dy) < 20.0) {
                 return v;
             }
         }
