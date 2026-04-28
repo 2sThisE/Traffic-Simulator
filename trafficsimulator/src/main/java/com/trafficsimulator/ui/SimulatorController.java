@@ -14,6 +14,7 @@ import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightController;
 import com.trafficsimulator.util.GlobalTimer;
 import com.trafficsimulator.util.Navigate;
+import com.trafficsimulator.vehicle.VehicleType;
 
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
@@ -58,6 +59,7 @@ public class SimulatorController {
     private boolean isSimulationRunning = false; 
     private boolean isDraggingObject = false; // 신호등/카메라 드래그용 ❤️
     private boolean isDraggingVehicle = false; // 차량 드래그용 추가
+    private boolean isDebugMode = false; // 디버그 모드 플래그 추가 ❤️
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
@@ -173,12 +175,22 @@ public class SimulatorController {
         requestRender();
     }
 
+    public void setDebugMode(boolean debugMode) {
+        this.isDebugMode = debugMode;
+        setupComponentTree(); // 컴포넌트 트리 갱신 ❤️
+    }
+
     private void setupComponentTree() {
         TreeItem<String> root = new TreeItem<>("Components");
         root.setExpanded(true);
         root.getChildren().add(new TreeItem<>("Road"));
         root.getChildren().add(new TreeItem<>("Traffic Light"));
-        root.getChildren().add(new TreeItem<>("Camera")); // 추가 ❤️
+        root.getChildren().add(new TreeItem<>("Camera")); 
+        
+        if (isDebugMode) {
+            root.getChildren().add(new TreeItem<>("Vehicle")); // 디버그 모드일 때만 차량 추가 가능 ❤️
+        }
+        
         componentTreeView.setRoot(root);
         componentTreeView.setShowRoot(false);
     }
@@ -260,6 +272,24 @@ public class SimulatorController {
                         Camera cam = new Camera(hit.road, worldPt, hit.lane);
                         roadManager.addCamera(cam);
                         selectionManager.selectCamera(cam);
+                        modeManager.setMode(EditorMode.SELECT);
+                    }
+                } else if (modeManager.getMode() == EditorMode.ADD_VEHICLE && isDebugMode) { // 차량 추가 (디버그 전용) ❤️
+                    RoadManager.HitResult hit = roadManager.findHit(worldPt);
+                    if (hit.lane != null) {
+                        Vehicle car = new Vehicle(worldPt.x, worldPt.y, 0, VehicleType.NORMAL);
+                        car.snapToNearestPoint(worldPt, junctionController);
+                        
+                        // 기본 경로 설정 (현재 차선 기준)
+                        List<Set<Lane>> route = Navigate.calculateRoute(hit.lane, roadManager, junctionController);
+                        if (route != null) {
+                            car.setLogicalRoute(route);
+                            car.updateDynamicPath(junctionController);
+                            car.updateVisionArea(roadManager, junctionController);
+                        }
+                        
+                        vehicles.add(car);
+                        selectionManager.selectVehicle(car);
                         modeManager.setMode(EditorMode.SELECT);
                     }
                 } else {

@@ -21,6 +21,8 @@ public class EditorModeManager {
                     setMode(EditorMode.ADD_TRAFFIC_LIGHT);
                 } else if ("Camera".equals(value)) { // 카메라 모드 추가 ❤️
                     setMode(EditorMode.ADD_CAMERA);
+                } else if ("Vehicle".equals(value)) { // 차량 모드 추가 (디버그 전용) ❤️
+                    setMode(EditorMode.ADD_VEHICLE);
                 } else {
                     setMode(EditorMode.SELECT);
                 }

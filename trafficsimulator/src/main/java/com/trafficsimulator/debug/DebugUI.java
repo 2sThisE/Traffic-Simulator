@@ -35,6 +35,7 @@ public class DebugUI extends Application {
         Parent root = loader.load();
         
         controller = loader.getController();
+        controller.setDebugMode(true); // 디버그 모드 활성화 ❤️
         roadManager = controller.getRoadManager();
         junctionController = controller.getJunctionController();
 

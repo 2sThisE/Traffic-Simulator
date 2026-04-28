@@ -81,15 +81,52 @@ public class Autopilot {
         }
 
         double laneWidthPx = UnitConverter.toPixel(3.5); 
-        double halfWidth = (laneWidthPx + UnitConverter.toPixel(0.5)) / 2.0;
+        // 차선 경계에서 살짝 안쪽으로 들어오도록 0.4m 정도 여유를 줌 ❤️
+        double halfWidth = (laneWidthPx - UnitConverter.toPixel(0.4)) / 2.0;
 
         // 1. 전방 감지 영역 (신호등, 카메라용) ❤️
+        // 변경 가능한 모든 차선 영역 생성
         Area forwardLanesArea = new Area();
         buildLanesArea(forwardLanesArea, forwardTargetLanes, currentPhaseIndex, junctionController, halfWidth);
+        
+        // Raycast용으로 여유가 있는 넓은 차선 영역 생성 (차량이 경계에 살짝 걸쳐서 눈이 멀어버리는 현상 방지 ❤️)
+        Area raycastArea = new Area();
+        buildLanesArea(raycastArea, forwardTargetLanes, currentPhaseIndex, junctionController, laneWidthPx / 2.0 + UnitConverter.toPixel(0.5));
 
-        double frontMaxDist = UnitConverter.toPixel(150.0);
-        Path2D.Double coneMask = createConeMask(p0, vehicle.getAngle(), frontMaxDist, 120.0);
-        Area forwardVision = new Area(coneMask);
+        double maxDistPx = UnitConverter.toPixel(300.0);
+        double rad = Math.toRadians(vehicle.getAngle());
+        double cos = Math.cos(rad);
+        double sin = Math.sin(rad);
+        
+        // 차량의 앞부분 좌표 계산
+        Point2D.Double frontPos = new Point2D.Double(
+            vehicle.getX() + cos * (vehicle.getWidth() / 2.0),
+            vehicle.getY() + sin * (vehicle.getWidth() / 2.0)
+        );
+
+        // 오빠가 말한대로 직진으로 300m 쏘면서 차선의 끝 경계 찾기! ❤️
+        double actualRadiusPx = maxDistPx;
+        double stepPx = UnitConverter.toPixel(1.0); // 1미터 간격 정밀 탐색
+        boolean inside = false;
+        
+        for (double d = 0; d <= maxDistPx; d += stepPx) {
+            double tx = frontPos.x + cos * d;
+            double ty = frontPos.y + sin * d;
+            
+            if (raycastArea.contains(tx, ty)) {
+                inside = true;
+            } else if (inside) {
+                // 차선 안에 있다가 밖으로 나가는 순간이 바로 끝 경계야!
+                actualRadiusPx = d;
+                break;
+            }
+        }
+
+        // 끝 경계까지의 거리를 반지름으로 120도 부채꼴 그리기! ❤️
+        Path2D.Double arcMask = createConeMask(frontPos, vehicle.getAngle(), actualRadiusPx, 120.0);
+        Area forwardVision = new Area(arcMask);
+        
+        // 그 결과를 다시 변경가능한 모든 차선만 감지되도록 다시 자르기! ❤️
         forwardVision.intersect(forwardLanesArea);
         fillVisionList(forwardVisionArea, forwardVision);
 
@@ -109,44 +146,122 @@ public class Autopilot {
         }
         fillVisionList(sideVisionArea, sideVision);
 
-        // 3. 전방 차량 감지 영역 (신호등 감지처럼 직선으로 뻗되, 차선 경계 중 가장 먼 접점 기준) ❤️
+        // 3. 전방 차량 감지 영역 (도로 굴곡 추적 방식) ❤️
         double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh());
+        safetyDistM = Math.min(safetyDistM, 100.0); // 최대 100m 제한
         double safetyDistPx = UnitConverter.toPixel(safetyDistM);
         
-        // 현재 차선 및 향후 경로를 포함하는 전체 영역 생성
-        Area trackArea = new Area();
-        buildLanesArea(trackArea, Collections.singletonList(currentLane), currentPhaseIndex, junctionController, halfWidth);
-
-        // [STEP A] 우선 최대 안전거리까지 직선으로 뻗는 임시 마스크 생성
-        Path2D.Double tempMask = createRectMask(p0, vehicle.getAngle(), vehicleHalfLength, safetyDistPx, halfWidth * 2.0);
-        Area tempIntersection = new Area(tempMask);
-        tempIntersection.intersect(trackArea);
-
-        // [STEP B] 임시 영역의 점들 중 차량 중심(p0)에서 가장 먼 거리 찾기 ❤️
-        double maxContactDistSq = 0;
-        PathIterator pi = tempIntersection.getPathIterator(null);
-        double[] coords = new double[6];
-        while (!pi.isDone()) {
-            int type = pi.currentSegment(coords);
-            if (type != PathIterator.SEG_CLOSE) {
-                double d2 = p0.distanceSq(coords[0], coords[1]);
-                if (d2 > maxContactDistSq) {
-                    maxContactDistSq = d2;
-                }
-            }
-            pi.next();
+        // 경로 추적을 통해 안전거리만큼의 포인트 리스트 생성
+        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, p0, safetyDistPx, currentPhaseIndex, junctionController);
+        
+        Area vehicleVision = new Area();
+        if (tracedPath != null && tracedPath.size() >= 2) {
+            addPathToArea(vehicleVision, tracedPath, halfWidth);
         }
         
-        // [STEP C] 가장 먼 접점의 거리를 감지 영역의 최종 길이로 설정
-        double finalLength = Math.sqrt(maxContactDistSq) - vehicleHalfLength;
-        finalLength = Math.max(0, Math.min(finalLength, safetyDistPx)); // 안전거리 내로 보정
-
-        // [STEP D] 결정된 길이를 바탕으로 최종 영역 생성
-        Path2D.Double finalRect = createRectMask(p0, vehicle.getAngle(), vehicleHalfLength, finalLength, halfWidth * 2.0);
-        Area vehicleVision = new Area(finalRect);
-        vehicleVision.intersect(trackArea); 
-        
         fillVisionList(vehicleVisionArea, vehicleVision);
+    }
+
+    /**
+     * 현재 위치에서부터 경로를 따라 지정된 거리만큼의 포인트 리스트를 추출합니다. ❤️
+     */
+    private List<Point2D.Double> traceRoutePath(Lane startLane, Point2D.Double startPos, double totalDist, int startPhaseIdx, JunctionController junctionController) {
+        List<Point2D.Double> traced = new ArrayList<>();
+        double remainingDist = totalDist;
+        
+        Lane currentLane = startLane;
+        Point2D.Double currentPos = startPos;
+
+        for (int p = startPhaseIdx; p < logicalRoute.size(); p++) {
+            // 1. 현재 차선에서의 subPath 추출
+            List<Point2D.Double> sub = getLaneSubPath(currentLane, currentPos, 0, remainingDist, junctionController);
+            if (sub != null && !sub.isEmpty()) {
+                // 중복 점 제거하며 추가
+                for (Point2D.Double pt : sub) {
+                    if (traced.isEmpty() || traced.get(traced.size() - 1).distanceSq(pt) > 0.1) {
+                        traced.add(pt);
+                    }
+                }
+                
+                // 이동한 거리만큼 차감
+                double segmentDist = 0;
+                for (int i = 0; i < sub.size() - 1; i++) {
+                    segmentDist += sub.get(i).distance(sub.get(i + 1));
+                }
+                remainingDist -= segmentDist;
+            }
+
+            if (remainingDist <= 1.0) break; // 거리 다 채움
+
+            // 2. 다음 단계로 넘어가기 위한 연결 탐색
+            if (p < logicalRoute.size() - 1 && junctionController != null) {
+                Set<Lane> nextPhaseLanes = logicalRoute.get(p + 1);
+                Set<LaneConnection> conns = junctionController.getConnectionList(currentLane);
+                LaneConnection nextConn = null;
+                
+                if (conns != null) {
+                    for (LaneConnection conn : conns) {
+                        if (nextPhaseLanes.contains(conn.targetLane())) {
+                            nextConn = conn;
+                            break;
+                        }
+                    }
+                }
+
+                if (nextConn != null) {
+                    List<Point2D.Double> connPath = nextConn.connectionPath();
+                    // 연결로(Connection) 추적
+                    List<Point2D.Double> connSub = getPathSubList(connPath, remainingDist);
+                    if (connSub != null && !connSub.isEmpty()) {
+                        for (Point2D.Double pt : connSub) {
+                            if (traced.isEmpty() || traced.get(traced.size() - 1).distanceSq(pt) > 0.1) {
+                                traced.add(pt);
+                            }
+                        }
+                        double cDist = 0;
+                        for (int i = 0; i < connSub.size() - 1; i++) {
+                            cDist += connSub.get(i).distance(connSub.get(i + 1));
+                        }
+                        remainingDist -= cDist;
+                        
+                        // 다음 차선 준비
+                        currentLane = nextConn.targetLane();
+                        currentPos = connSub.get(connSub.size() - 1);
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+            
+            if (remainingDist <= 1.0) break;
+        }
+        
+        return traced;
+    }
+
+    private List<Point2D.Double> getPathSubList(List<Point2D.Double> fullPath, double maxDist) {
+        if (fullPath == null || fullPath.isEmpty()) return null;
+        List<Point2D.Double> sub = new ArrayList<>();
+        double acc = 0;
+        sub.add(fullPath.get(0));
+        for (int i = 0; i < fullPath.size() - 1; i++) {
+            double d = fullPath.get(i).distance(fullPath.get(i + 1));
+            if (acc + d > maxDist) {
+                double ratio = (maxDist - acc) / d;
+                Point2D.Double p1 = fullPath.get(i);
+                Point2D.Double p2 = fullPath.get(i + 1);
+                sub.add(new Point2D.Double(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio));
+                break;
+            }
+            sub.add(fullPath.get(i + 1));
+            acc += d;
+            if (acc >= maxDist) break;
+        }
+        return sub;
     }
 
     private void fillVisionList(List<Point2D.Double> targetList, Area area) {
