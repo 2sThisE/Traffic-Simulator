@@ -124,17 +124,17 @@ public class Autopilot {
 
         // 2. 측방 감지 영역 (타 차량용) ❤️
         Area sideVision = new Area();
-        double sideMaxDist = UnitConverter.toPixel(50.0);
-        double sideForwardDist = UnitConverter.toPixel(50.0); // 전방 50m 추가 ❤️
+        double sideMaxDist = UnitConverter.toPixel(40.0); // 앞뒤 40m로 분리 적용 ❤️
         double vehicleHalfLength = vehicle.getWidth() / 2.0;
 
         for (Lane lane : sideTargetLanes) {
             double myProjDist = getProjectionDistance(lane, p0);
             if (myProjDist < 0) continue;
 
-            // 측방 차량 감지 및 범위 축소 로직 ❤️
-            double adjustedBackDist = sideMaxDist;
-            double adjustedForwardDist = sideForwardDist;
+            // 구간 3개로 분리: 바로 옆(Center), 뒤쪽(Back), 앞쪽(Forward) ❤️
+            boolean centerBlocked = false;
+            double forwardLimit = sideMaxDist;
+            double backwardLimit = sideMaxDist;
 
             for (Vehicle other : allVehicles) {
                 if (other == vehicle) continue;
@@ -160,22 +160,26 @@ public class Autopilot {
                             double longDist = otherProjDist - myProjDist;
                             double otherHalfLength = other.getWidth() / 2.0;
 
-                            // 차량이 겹쳐있거나 바로 옆에 있는 경우
-                            if (Math.abs(longDist) < (vehicleHalfLength + otherHalfLength)) {
-                                adjustedBackDist = 0;
-                                adjustedForwardDist = 0;
-                                break; // 완전히 막힘
-                            } else if (longDist > 0) {
-                                // 다른 차량이 내 앞에 있는 경우
-                                double clearDist = longDist - otherHalfLength - vehicleHalfLength;
-                                if (clearDist < adjustedForwardDist) {
-                                    adjustedForwardDist = Math.max(0, clearDist);
+                            double otherFront = longDist + otherHalfLength;
+                            double otherRear = longDist - otherHalfLength;
+
+                            // 1. 바로 옆(Center) 범위 검사: [-vehicleHalfLength, vehicleHalfLength]
+                            if (otherFront > -vehicleHalfLength && otherRear < vehicleHalfLength) {
+                                centerBlocked = true;
+                                //break; // 내 차 바로 옆에 차가 있으면 아예 변경 불가능 판단, 범위 그리지 않음
+                            } 
+                            // 2. 앞쪽 40m 범위 검사: 다른 차가 내 차보다 앞에 있을 때
+                            else if (otherRear >= vehicleHalfLength) {
+                                double clearDist = otherRear - vehicleHalfLength;
+                                if (clearDist < forwardLimit) {
+                                    forwardLimit = Math.max(0, clearDist);
                                 }
-                            } else {
-                                // 다른 차량이 내 뒤에 있는 경우
-                                double clearDist = -longDist - otherHalfLength - vehicleHalfLength;
-                                if (clearDist < adjustedBackDist) {
-                                    adjustedBackDist = Math.max(0, clearDist);
+                            } 
+                            // 3. 뒤쪽 40m 범위 검사: 다른 차가 내 차보다 뒤에 있을 때
+                            else if (otherFront <= -vehicleHalfLength) {
+                                double clearDist = -vehicleHalfLength - otherFront;
+                                if (clearDist < backwardLimit) {
+                                    backwardLimit = Math.max(0, clearDist);
                                 }
                             }
                         }
@@ -183,12 +187,15 @@ public class Autopilot {
                 }
             }
 
-            double startOffset = -vehicleHalfLength - adjustedBackDist;
-            double endOffset = vehicleHalfLength + adjustedForwardDist;
-            
-            List<Point2D.Double> subPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
-            if (subPath != null && subPath.size() >= 2) {
-                addPathToArea(sideVision, subPath, halfWidth);
+            // 바로 옆 범위(Center)에 차량이 없어서 안전한 경우에만 각각 축소된 앞/뒤 범위를 합쳐서 그립니다. ❤️
+            if (!centerBlocked) {
+                double startOffset = -vehicleHalfLength - backwardLimit;
+                double endOffset = vehicleHalfLength + forwardLimit;
+                
+                List<Point2D.Double> subPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
+                if (subPath != null && subPath.size() >= 2) {
+                    addPathToArea(sideVision, subPath, halfWidth);
+                }
             }
         }
         fillVisionList(sideVisionArea, sideVision);
