@@ -125,29 +125,57 @@ public class Autopilot {
         // 2. 측방 감지 영역 (타 차량용) ❤️
         Area sideVision = new Area();
         double sideMaxDist = UnitConverter.toPixel(50.0);
+        double sideForwardDist = UnitConverter.toPixel(50.0); // 전방 50m 추가 ❤️
         double vehicleHalfLength = vehicle.getWidth() / 2.0;
 
         for (Lane lane : sideTargetLanes) {
-            double startOffset = vehicleHalfLength - sideMaxDist;
-            double endOffset = vehicleHalfLength;
-            
+            double myProjDist = getProjectionDistance(lane, p0);
+            if (myProjDist < 0) continue;
+
             // 측방 차량 감지 및 범위 축소 로직 ❤️
-            double adjustedMaxDist = sideMaxDist;
+            double adjustedBackDist = sideMaxDist;
+            double adjustedForwardDist = sideForwardDist;
+
             for (Vehicle other : allVehicles) {
                 if (other == vehicle) continue;
-                Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
-                RoadManager.HitResult otherHit = roadManager.findHit(otherPos);
-                if (otherHit.lane == lane) {
-                    // 차량이 측방 감지 경로상에 있는지 확인
-                    List<Point2D.Double> testPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
-                    if (testPath != null && testPath.size() >= 2) {
-                        for (int i = 0; i < testPath.size() - 1; i++) {
-                            double dSq = getDistanceSqToSegment(testPath.get(i), testPath.get(i + 1), otherPos);
-                            if (dSq < (laneWidthPx * laneWidthPx / 4.0)) {
-                                // 감지됨! 거리에 맞춰 범위 축소
-                                double dist = p0.distance(otherPos) - other.getWidth() / 2.0;
-                                if (dist < adjustedMaxDist) {
-                                    adjustedMaxDist = Math.max(0, dist);
+
+                // 다른 차량이 해당 차선이 속한 도로를 실제로 주행 중인지(논리적 검사) ❤️
+                boolean isOnSameRoad = false;
+                List<Set<Lane>> otherRoute = other.getLogicalRoute();
+                int otherPhaseIdx = other.getCurrentPhaseIndex();
+                if (otherRoute != null && !otherRoute.isEmpty() && otherPhaseIdx < otherRoute.size()) {
+                    Set<Lane> otherPhaseLanes = otherRoute.get(otherPhaseIdx);
+                    if (otherPhaseLanes.contains(lane)) {
+                        isOnSameRoad = true;
+                    }
+                }
+
+                if (isOnSameRoad) {
+                    Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+                    double otherProjDist = getProjectionDistance(lane, otherPos);
+                    if (otherProjDist >= 0) {
+                        double distToLaneCenterSq = getDistanceSqToPath(lane, otherPos);
+                        // 차선 너비 내에 있으면 (측방 차량이 실제로 해당 차선 위에 있으면)
+                        if (distToLaneCenterSq < (laneWidthPx * laneWidthPx / 4.0)) {
+                            double longDist = otherProjDist - myProjDist;
+                            double otherHalfLength = other.getWidth() / 2.0;
+
+                            // 차량이 겹쳐있거나 바로 옆에 있는 경우
+                            if (Math.abs(longDist) < (vehicleHalfLength + otherHalfLength)) {
+                                adjustedBackDist = 0;
+                                adjustedForwardDist = 0;
+                                break; // 완전히 막힘
+                            } else if (longDist > 0) {
+                                // 다른 차량이 내 앞에 있는 경우
+                                double clearDist = longDist - otherHalfLength - vehicleHalfLength;
+                                if (clearDist < adjustedForwardDist) {
+                                    adjustedForwardDist = Math.max(0, clearDist);
+                                }
+                            } else {
+                                // 다른 차량이 내 뒤에 있는 경우
+                                double clearDist = -longDist - otherHalfLength - vehicleHalfLength;
+                                if (clearDist < adjustedBackDist) {
+                                    adjustedBackDist = Math.max(0, clearDist);
                                 }
                             }
                         }
@@ -155,7 +183,10 @@ public class Autopilot {
                 }
             }
 
-            List<Point2D.Double> subPath = getLaneSubPath(lane, p0, vehicleHalfLength - adjustedMaxDist, endOffset, junctionController);
+            double startOffset = -vehicleHalfLength - adjustedBackDist;
+            double endOffset = vehicleHalfLength + adjustedForwardDist;
+            
+            List<Point2D.Double> subPath = getLaneSubPath(lane, p0, startOffset, endOffset, junctionController);
             if (subPath != null && subPath.size() >= 2) {
                 addPathToArea(sideVision, subPath, halfWidth);
             }
@@ -171,21 +202,46 @@ public class Autopilot {
         double adjustedSafetyDistPx = safetyDistPx;
         for (Vehicle other : allVehicles) {
             if (other == vehicle) continue;
+
+            // 전방 안전거리 감지 예외 처리 (다른 도로면 무시) ❤️
+            boolean isOnSameRoad = false;
+            List<Set<Lane>> otherRoute = other.getLogicalRoute();
+            int otherPhaseIdx = other.getCurrentPhaseIndex();
+            if (otherRoute != null && !otherRoute.isEmpty() && otherPhaseIdx < otherRoute.size()) {
+                Set<Lane> otherPhaseLanes = otherRoute.get(otherPhaseIdx);
+                for (int p = currentPhaseIndex; p < logicalRoute.size(); p++) {
+                    Set<Lane> myPhaseLanes = logicalRoute.get(p);
+                    if (!Collections.disjoint(myPhaseLanes, otherPhaseLanes)) {
+                        isOnSameRoad = true;
+                        break;
+                    }
+                }
+            }
+            if (!isOnSameRoad) continue;
+
             Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
             
             // 임시로 전체 경로를 추적해서 해당 차량이 내 경로 위에 있는지 확인 (앞부분 frontPos 기준 시작! ❤️)
             List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, safetyDistPx, currentPhaseIndex, junctionController);
             if (fullTraced != null && fullTraced.size() >= 2) {
+                double accumulatedDist = 0;
                 for (int i = 0; i < fullTraced.size() - 1; i++) {
-                    double dSq = getDistanceSqToSegment(fullTraced.get(i), fullTraced.get(i + 1), otherPos);
+                    Point2D.Double p1 = fullTraced.get(i);
+                    Point2D.Double p2 = fullTraced.get(i + 1);
+                    double dSq = getDistanceSqToSegment(p1, p2, otherPos);
+                    
                     // 차선 너비 내에 있으면 같은 차선으로 간주
                     if (dSq < (laneWidthPx * laneWidthPx / 4.0)) {
-                        // 거리 계산도 앞부분 frontPos 기준으로 변경해서 더 정확하게! ❤️
-                        double dist = frontPos.distance(otherPos) - other.getWidth() / 2.0;
-                        if (dist < adjustedSafetyDistPx) {
-                            adjustedSafetyDistPx = Math.max(0, dist);
+                        // 경로를 따라 계산한 거리를 사용하여 다른 차량 뒷부분까지의 거리 계산 ❤️
+                        Point2D.Double closest = getClosestPointOnSegment(p1, p2, otherPos);
+                        double pathDistToOtherCenter = accumulatedDist + p1.distance(closest);
+                        double pathDistToOtherRear = pathDistToOtherCenter - other.getWidth() / 2.0;
+                        
+                        if (pathDistToOtherRear < adjustedSafetyDistPx) {
+                            adjustedSafetyDistPx = Math.max(0, pathDistToOtherRear);
                         }
                     }
+                    accumulatedDist += p1.distance(p2);
                 }
             }
         }
@@ -199,6 +255,51 @@ public class Autopilot {
         }
         
         fillVisionList(vehicleVisionArea, vehicleVision);
+    }
+
+    /**
+     * 차선의 시작점으로부터 특정 좌표까지 경로를 따라 이동한 투영 거리(Projection Distance)를 반환합니다.
+     */
+    private double getProjectionDistance(Lane lane, Point2D.Double pos) {
+        List<Point2D.Double> fullPath = lane.getLanePath();
+        if (fullPath == null || fullPath.size() < 2) return -1;
+        
+        List<Point2D.Double> path = new ArrayList<>(fullPath);
+        if (!lane.isRoadDirection()) Collections.reverse(path);
+
+        double accumulatedDist = 0;
+        double minDist = Double.MAX_VALUE;
+        double currentProjDist = 0;
+
+        for (int i = 0; i < path.size() - 1; i++) {
+            Point2D.Double p1 = path.get(i);
+            Point2D.Double p2 = path.get(i + 1);
+            Point2D.Double closest = getClosestPointOnSegment(p1, p2, pos);
+            double d = closest.distance(pos);
+            if (d < minDist) {
+                minDist = d;
+                currentProjDist = accumulatedDist + p1.distance(closest);
+            }
+            accumulatedDist += p1.distance(p2);
+        }
+        return currentProjDist;
+    }
+
+    /**
+     * 특정 좌표가 경로와 얼마나 떨어져 있는지 최단 거리의 제곱을 반환합니다.
+     */
+    private double getDistanceSqToPath(Lane lane, Point2D.Double pos) {
+        List<Point2D.Double> fullPath = lane.getLanePath();
+        if (fullPath == null || fullPath.size() < 2) return Double.MAX_VALUE;
+
+        double minDistSq = Double.MAX_VALUE;
+        for (int i = 0; i < fullPath.size() - 1; i++) {
+            double dSq = getDistanceSqToSegment(fullPath.get(i), fullPath.get(i + 1), pos);
+            if (dSq < minDistSq) {
+                minDistSq = dSq;
+            }
+        }
+        return minDistSq;
     }
 
     /**
