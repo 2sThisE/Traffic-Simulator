@@ -127,13 +127,14 @@ public class Autopilot {
         Area forwardVision = new Area(arcMask);
         forwardVision.intersect(forwardLanesArea);
         
-        this.lastForwardVisionArea = forwardVision; // Area 저장
-        fillVisionList(forwardVisionArea, forwardVision); // 포인트 리스트 변환
+        this.lastForwardVisionArea = forwardVision; 
+        fillVisionList(forwardVisionArea, forwardVision); 
 
         // 2. 측방 감지 영역 (타 차량용) ❤️
         Area sideVision = new Area();
         double sideMaxDist = UnitConverter.toPixel(40.0); 
         double vehicleHalfLength = vehicle.getWidth() / 2.0;
+        double sideMaxCheckDistSq = (sideMaxDist + UnitConverter.toPixel(20.0)) * (sideMaxDist + UnitConverter.toPixel(20.0));
 
         for (Lane lane : sideTargetLanes) {
             double myProjDist = getProjectionDistance(lane, p0);
@@ -142,6 +143,9 @@ public class Autopilot {
             List<double[]> occupiedRanges = new ArrayList<>();
             for (Vehicle other : allVehicles) {
                 if (other == vehicle) continue;
+                
+                Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+                if (p0.distanceSq(otherPos) > sideMaxCheckDistSq) continue; // 최적화: 일정 거리 이상 차량 패스
 
                 boolean isOnSameRoad = false;
                 List<Set<Lane>> otherRoute = other.getLogicalRoute();
@@ -154,10 +158,10 @@ public class Autopilot {
                 }
 
                 if (isOnSameRoad) {
-                    Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
-                    double otherProjDist = getProjectionDistance(lane, otherPos);
+                    double[] projAndDistSq = getProjectionAndDistanceSq(lane, otherPos);
+                    double otherProjDist = projAndDistSq[0];
                     if (otherProjDist >= 0) {
-                        double distToLaneCenterSq = getDistanceSqToPath(lane, otherPos);
+                        double distToLaneCenterSq = projAndDistSq[1];
                         if (distToLaneCenterSq < (laneWidthPx * laneWidthPx / 4.0)) {
                             double longDist = otherProjDist - myProjDist;
                             double otherHalfLength = other.getWidth() / 2.0;
@@ -169,7 +173,6 @@ public class Autopilot {
 
             occupiedRanges.sort((a, b) -> Double.compare(a[0], b[0]));
 
-            // 후방 경계: 가장 가까운 차까지만 (최대 40m) ❤️
             double nearestRearBoundary = -sideMaxDist;
             for (double[] range : occupiedRanges) {
                 if (range[0] < -vehicleHalfLength) {
@@ -181,7 +184,6 @@ public class Autopilot {
             double viewEnd = sideMaxDist;
             double currentPos = viewStart;
 
-            // 전방: 모든 빈 공간 표시 ❤️
             for (double[] range : occupiedRanges) {
                 if (range[1] <= currentPos) continue;
                 if (range[0] > currentPos) {
@@ -206,8 +208,8 @@ public class Autopilot {
             }
         }
         
-        this.lastSideVisionArea = sideVision; // Area 저장
-        fillVisionList(sideVisionArea, sideVision); // 포인트 리스트 변환
+        this.lastSideVisionArea = sideVision; 
+        fillVisionList(sideVisionArea, sideVision); 
 
         // 3. 전방 차량 감지 영역 (안전거리용) ❤️
         double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh());
@@ -215,27 +217,32 @@ public class Autopilot {
         double safetyDistPx = UnitConverter.toPixel(safetyDistM);
         
         double adjustedSafetyDistPx = safetyDistPx;
-        for (Vehicle other : allVehicles) {
-            if (other == vehicle) continue;
+        double maxSafetyDistSqForCheck = (safetyDistPx + UnitConverter.toPixel(40.0)) * (safetyDistPx + UnitConverter.toPixel(40.0));
+        
+        // 최적화: 루프 밖에서 공통 전방 경로 한 번만 추적
+        List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, safetyDistPx, currentPhaseIndex, junctionController);
 
-            boolean isOnSameRoad = false;
-            List<Set<Lane>> otherRoute = other.getLogicalRoute();
-            int otherPhaseIdx = other.getCurrentPhaseIndex();
-            if (otherRoute != null && !otherRoute.isEmpty() && otherPhaseIdx < otherRoute.size()) {
-                Set<Lane> otherPhaseLanes = otherRoute.get(otherPhaseIdx);
-                for (int p = currentPhaseIndex; p < logicalRoute.size(); p++) {
-                    Set<Lane> myPhaseLanes = logicalRoute.get(p);
-                    if (!Collections.disjoint(myPhaseLanes, otherPhaseLanes)) {
-                        isOnSameRoad = true;
-                        break;
+        if (fullTraced != null && fullTraced.size() >= 2) {
+            for (Vehicle other : allVehicles) {
+                if (other == vehicle) continue;
+                if (p0.distanceSq(other.getX(), other.getY()) > maxSafetyDistSqForCheck) continue; // 최적화: 너무 멀리 있는 차량 스킵
+
+                boolean isOnSameRoad = false;
+                List<Set<Lane>> otherRoute = other.getLogicalRoute();
+                int otherPhaseIdx = other.getCurrentPhaseIndex();
+                if (otherRoute != null && !otherRoute.isEmpty() && otherPhaseIdx < otherRoute.size()) {
+                    Set<Lane> otherPhaseLanes = otherRoute.get(otherPhaseIdx);
+                    for (int p = currentPhaseIndex; p < logicalRoute.size(); p++) {
+                        Set<Lane> myPhaseLanes = logicalRoute.get(p);
+                        if (!Collections.disjoint(myPhaseLanes, otherPhaseLanes)) {
+                            isOnSameRoad = true;
+                            break;
+                        }
                     }
                 }
-            }
-            if (!isOnSameRoad) continue;
+                if (!isOnSameRoad) continue;
 
-            Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
-            List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, safetyDistPx, currentPhaseIndex, junctionController);
-            if (fullTraced != null && fullTraced.size() >= 2) {
+                Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
                 double accumulatedDist = 0;
                 for (int i = 0; i < fullTraced.size() - 1; i++) {
                     Point2D.Double p1 = fullTraced.get(i);
@@ -261,41 +268,46 @@ public class Autopilot {
             addPathToArea(vehicleVision, tracedPath, halfWidth);
         }
         
-        this.lastVehicleVisionArea = vehicleVision; // Area 저장
-        fillVisionList(vehicleVisionArea, vehicleVision); // 포인트 리스트 변환
+        this.lastVehicleVisionArea = vehicleVision; 
+        fillVisionList(vehicleVisionArea, vehicleVision); 
+    }
+
+    private double[] getProjectionAndDistanceSq(Lane lane, Point2D.Double pos) {
+        List<Point2D.Double> fullPath = lane.getLanePath();
+        if (fullPath == null || fullPath.size() < 2) return new double[]{-1, Double.MAX_VALUE};
+        boolean reverse = !lane.isRoadDirection();
+        int size = fullPath.size();
+        
+        double accumulatedDist = 0;
+        double minDistSq = Double.MAX_VALUE;
+        double currentProjDist = 0;
+        
+        for (int i = 0; i < size - 1; i++) {
+            int idx1 = reverse ? size - 1 - i : i;
+            int idx2 = reverse ? size - 2 - i : i + 1;
+            Point2D.Double p1 = fullPath.get(idx1);
+            Point2D.Double p2 = fullPath.get(idx2);
+            
+            double dx = p2.x - p1.x, dy = p2.y - p1.y, l2 = dx * dx + dy * dy;
+            double t_proj = (l2 == 0) ? 0 : Math.max(0, Math.min(1, ((pos.x - p1.x) * dx + (pos.y - p1.y) * dy) / l2));
+            double cx = p1.x + t_proj * dx, cy = p1.y + t_proj * dy;
+            double dSq = (pos.x - cx) * (pos.x - cx) + (pos.y - cy) * (pos.y - cy);
+            
+            if (dSq < minDistSq) {
+                minDistSq = dSq;
+                currentProjDist = accumulatedDist + Math.sqrt((cx - p1.x) * (cx - p1.x) + (cy - p1.y) * (cy - p1.y));
+            }
+            accumulatedDist += Math.sqrt(l2);
+        }
+        return new double[]{currentProjDist, minDistSq};
     }
 
     private double getProjectionDistance(Lane lane, Point2D.Double pos) {
-        List<Point2D.Double> fullPath = lane.getLanePath();
-        if (fullPath == null || fullPath.size() < 2) return -1;
-        List<Point2D.Double> path = new ArrayList<>(fullPath);
-        if (!lane.isRoadDirection()) Collections.reverse(path);
-        double accumulatedDist = 0;
-        double minDist = Double.MAX_VALUE;
-        double currentProjDist = 0;
-        for (int i = 0; i < path.size() - 1; i++) {
-            Point2D.Double p1 = path.get(i);
-            Point2D.Double p2 = path.get(i + 1);
-            Point2D.Double closest = getClosestPointOnSegment(p1, p2, pos);
-            double d = closest.distance(pos);
-            if (d < minDist) {
-                minDist = d;
-                currentProjDist = accumulatedDist + p1.distance(closest);
-            }
-            accumulatedDist += p1.distance(p2);
-        }
-        return currentProjDist;
+        return getProjectionAndDistanceSq(lane, pos)[0];
     }
 
     private double getDistanceSqToPath(Lane lane, Point2D.Double pos) {
-        List<Point2D.Double> fullPath = lane.getLanePath();
-        if (fullPath == null || fullPath.size() < 2) return Double.MAX_VALUE;
-        double minDistSq = Double.MAX_VALUE;
-        for (int i = 0; i < fullPath.size() - 1; i++) {
-            double dSq = getDistanceSqToSegment(fullPath.get(i), fullPath.get(i + 1), pos);
-            if (dSq < minDistSq) minDistSq = dSq;
-        }
-        return minDistSq;
+        return getProjectionAndDistanceSq(lane, pos)[1];
     }
 
     private List<Point2D.Double> traceRoutePath(Lane startLane, Point2D.Double startPos, double totalDist, int startPhaseIdx, JunctionController junctionController) {
@@ -387,14 +399,14 @@ public class Autopilot {
 
     private Lane findNearestLane(Set<Lane> lanes, Point2D.Double pos) {
         Lane currentLane = null;
-        double minDistance = Double.MAX_VALUE;
+        double minDistanceSq = Double.MAX_VALUE;
         for (Lane lane : lanes) {
             List<Point2D.Double> pts = lane.getLanePath();
             if (pts == null || pts.size() < 2) continue;
             for (int i = 0; i < pts.size() - 1; i++) {
-                double d = getDistanceSqToSegment(pts.get(i), pts.get(i + 1), pos);
-                if (d < minDistance) {
-                    minDistance = d;
+                double dSq = getDistanceSqToSegment(pts.get(i), pts.get(i + 1), pos);
+                if (dSq < minDistanceSq) {
+                    minDistanceSq = dSq;
                     currentLane = lane;
                 }
             }
@@ -445,22 +457,30 @@ public class Autopilot {
     private List<Point2D.Double> getLaneSubPath(Lane lane, Point2D.Double vehiclePos, double startOffset, double endOffset, JunctionController junctionController) {
         List<Point2D.Double> lp = lane.getLanePath();
         if (lp == null || lp.size() < 2) return null;
-        List<Point2D.Double> fullPath = new ArrayList<>(lp);
-        if (!lane.isRoadDirection()) Collections.reverse(fullPath);
+        
+        boolean reverse = !lane.isRoadDirection();
+        int size = lp.size();
 
         double currentProjDist = 0;
         double accumulatedDist = 0;
-        double minDist = Double.MAX_VALUE;
-        for (int i = 0; i < fullPath.size() - 1; i++) {
-            Point2D.Double p1 = fullPath.get(i);
-            Point2D.Double p2 = fullPath.get(i + 1);
-            Point2D.Double closest = getClosestPointOnSegment(p1, p2, vehiclePos);
-            double d = closest.distance(vehiclePos);
-            if (d < minDist) {
-                minDist = d;
-                currentProjDist = accumulatedDist + p1.distance(closest);
+        double minDistSq = Double.MAX_VALUE;
+        
+        for (int i = 0; i < size - 1; i++) {
+            int idx1 = reverse ? size - 1 - i : i;
+            int idx2 = reverse ? size - 2 - i : i + 1;
+            Point2D.Double p1 = lp.get(idx1);
+            Point2D.Double p2 = lp.get(idx2);
+            
+            double dx = p2.x - p1.x, dy = p2.y - p1.y, l2 = dx * dx + dy * dy;
+            double t_proj = (l2 == 0) ? 0 : Math.max(0, Math.min(1, ((vehiclePos.x - p1.x) * dx + (vehiclePos.y - p1.y) * dy) / l2));
+            double cx = p1.x + t_proj * dx, cy = p1.y + t_proj * dy;
+            double dSq = (vehiclePos.x - cx) * (vehiclePos.x - cx) + (vehiclePos.y - cy) * (vehiclePos.y - cy);
+            
+            if (dSq < minDistSq) {
+                minDistSq = dSq;
+                currentProjDist = accumulatedDist + Math.sqrt((cx - p1.x) * (cx - p1.x) + (cy - p1.y) * (cy - p1.y));
             }
-            accumulatedDist += p1.distance(p2);
+            accumulatedDist += Math.sqrt(l2);
         }
 
         double targetStartDist = currentProjDist + startOffset;
@@ -468,9 +488,13 @@ public class Autopilot {
         List<Point2D.Double> subPath = new ArrayList<>();
         accumulatedDist = 0;
         boolean started = false;
-        for (int i = 0; i < fullPath.size() - 1; i++) {
-            Point2D.Double p1 = fullPath.get(i);
-            Point2D.Double p2 = fullPath.get(i + 1);
+        
+        for (int i = 0; i < size - 1; i++) {
+            int idx1 = reverse ? size - 1 - i : i;
+            int idx2 = reverse ? size - 2 - i : i + 1;
+            Point2D.Double p1 = lp.get(idx1);
+            Point2D.Double p2 = lp.get(idx2);
+            
             double segLen = p1.distance(p2);
             if (!started && accumulatedDist + segLen >= targetStartDist) {
                 double ratio = Math.max(0, (targetStartDist - accumulatedDist) / segLen);
@@ -528,7 +552,7 @@ public class Autopilot {
     }
 
     public void snapToNearestPoint(Point2D.Double target, JunctionController junctionController) {
-        double minDist = Double.MAX_VALUE;
+        double minDistSq = Double.MAX_VALUE;
         Point2D.Double bestPt = null;
         double bestAngle = vehicle.getAngle();
         int bestPhase = this.currentPhaseIndex;
@@ -538,15 +562,18 @@ public class Autopilot {
             for (int p = 0; p < logicalRoute.size(); p++) {
                 Set<Lane> phase = logicalRoute.get(p);
                 for (Lane lane : phase) {
-                    List<Point2D.Double> points = new ArrayList<>(lane.getLanePath());
-                    if (!lane.isRoadDirection()) Collections.reverse(points);
-                    for (int i = 0; i < points.size() - 1; i++) {
-                        Point2D.Double p1 = points.get(i);
-                        Point2D.Double p2 = points.get(i + 1);
+                    List<Point2D.Double> points = lane.getLanePath();
+                    boolean reverse = !lane.isRoadDirection();
+                    int size = points.size();
+                    for (int i = 0; i < size - 1; i++) {
+                        int idx1 = reverse ? size - 1 - i : i;
+                        int idx2 = reverse ? size - 2 - i : i + 1;
+                        Point2D.Double p1 = points.get(idx1);
+                        Point2D.Double p2 = points.get(idx2);
                         Point2D.Double closest = getClosestPointOnSegment(p1, p2, target);
-                        double d = closest.distance(target);
-                        if (d < minDist) {
-                            minDist = d;
+                        double dSq = closest.distanceSq(target);
+                        if (dSq < minDistSq) {
+                            minDistSq = dSq;
                             bestPt = closest;
                             bestAngle = Math.toDegrees(Math.atan2(p2.y - p1.y, p2.x - p1.x));
                             bestPhase = p;
@@ -566,9 +593,9 @@ public class Autopilot {
                                         Point2D.Double p1 = connPath.get(i);
                                         Point2D.Double p2 = connPath.get(i + 1);
                                         Point2D.Double closest = getClosestPointOnSegment(p1, p2, target);
-                                        double d = closest.distance(target);
-                                        if (d < minDist) {
-                                            minDist = d;
+                                        double dSq = closest.distanceSq(target);
+                                        if (dSq < minDistSq) {
+                                            minDistSq = dSq;
                                             bestPt = closest;
                                             bestAngle = Math.toDegrees(Math.atan2(p2.y - p1.y, p2.x - p1.x));
                                             bestPhase = p; 
@@ -594,9 +621,9 @@ public class Autopilot {
                 Point2D.Double p1 = path.get(i);
                 Point2D.Double p2 = path.get(i + 1);
                 Point2D.Double closest = getClosestPointOnSegment(p1, p2, target);
-                double d = closest.distance(target);
-                if (d < minDist) {
-                    minDist = d;
+                double dSq = closest.distanceSq(target);
+                if (dSq < minDistSq) {
+                    minDistSq = dSq;
                     bestPt = closest;
                     bestAngle = Math.toDegrees(Math.atan2(p2.y - p1.y, p2.x - p1.x));
                 }
@@ -681,33 +708,47 @@ public class Autopilot {
             } else stepTargetLane = currentLane;
         }
 
-        List<Point2D.Double> orderedPoints = new ArrayList<>(stepTargetLane.getLanePath());
-        if (!stepTargetLane.isRoadDirection()) Collections.reverse(orderedPoints);
+        List<Point2D.Double> orderedPoints = stepTargetLane.getLanePath();
+        boolean reverse = !stepTargetLane.isRoadDirection();
+        int size = orderedPoints.size();
 
         double accDist = 0, currentProjDist = 0, minDistToPath = Double.MAX_VALUE;
-        for (int i = 0; i < orderedPoints.size() - 1; i++) {
-            Point2D.Double closest = getClosestPointOnSegment(orderedPoints.get(i), orderedPoints.get(i + 1), p0);
-            double d = closest.distance(p0);
-            if (d < minDistToPath) { minDistToPath = d; currentProjDist = accDist + orderedPoints.get(i).distance(closest); }
-            accDist += orderedPoints.get(i).distance(orderedPoints.get(i+1));
+        for (int i = 0; i < size - 1; i++) {
+            int idx1 = reverse ? size - 1 - i : i;
+            int idx2 = reverse ? size - 2 - i : i + 1;
+            Point2D.Double p1 = orderedPoints.get(idx1);
+            Point2D.Double p2 = orderedPoints.get(idx2);
+            Point2D.Double closest = getClosestPointOnSegment(p1, p2, p0);
+            double dSq = closest.distanceSq(p0);
+            if (dSq < minDistToPath) { 
+                minDistToPath = dSq; 
+                currentProjDist = accDist + p1.distance(closest); 
+            }
+            accDist += p1.distance(p2);
         }
 
         double targetDist = currentProjDist + lookaheadDist;
         Point2D.Double p3 = null, p2_dir = null;
         accDist = 0;
-        for (int i = 0; i < orderedPoints.size() - 1; i++) {
-            double segLen = orderedPoints.get(i).distance(orderedPoints.get(i+1));
+        for (int i = 0; i < size - 1; i++) {
+            int idx1 = reverse ? size - 1 - i : i;
+            int idx2 = reverse ? size - 2 - i : i + 1;
+            Point2D.Double p1 = orderedPoints.get(idx1);
+            Point2D.Double p2 = orderedPoints.get(idx2);
+            double segLen = p1.distance(p2);
             if (accDist + segLen >= targetDist) {
                 double ratio = (targetDist - accDist) / segLen;
-                p3 = new Point2D.Double(orderedPoints.get(i).x + (orderedPoints.get(i+1).x - orderedPoints.get(i).x) * ratio, orderedPoints.get(i).y + (orderedPoints.get(i+1).y - orderedPoints.get(i).y) * ratio);
-                p2_dir = new Point2D.Double(orderedPoints.get(i+1).x - orderedPoints.get(i).x, orderedPoints.get(i+1).y - orderedPoints.get(i).y);
+                p3 = new Point2D.Double(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio);
+                p2_dir = new Point2D.Double(p2.x - p1.x, p2.y - p1.y);
                 break;
             }
             accDist += segLen;
         }
         if (p3 == null) {
-            p3 = orderedPoints.get(orderedPoints.size() - 1);
-            p2_dir = new Point2D.Double(p3.x - orderedPoints.get(orderedPoints.size() - 2).x, p3.y - orderedPoints.get(orderedPoints.size() - 2).y);
+            int lastIdx = reverse ? 0 : size - 1;
+            int prevIdx = reverse ? 1 : size - 2;
+            p3 = orderedPoints.get(lastIdx);
+            p2_dir = new Point2D.Double(p3.x - orderedPoints.get(prevIdx).x, p3.y - orderedPoints.get(prevIdx).y);
         }
 
         double dist = p0.distance(p3), weight = dist / 2.5;
@@ -744,8 +785,11 @@ public class Autopilot {
     }
 
     private double getDistanceSqToSegment(Point2D.Double p1, Point2D.Double p2, Point2D.Double t) {
-        Point2D.Double closest = getClosestPointOnSegment(p1, p2, t);
-        return t.distanceSq(closest);
+        double dx = p2.x - p1.x, dy = p2.y - p1.y, l2 = dx * dx + dy * dy;
+        if (l2 == 0) return t.distanceSq(p1);
+        double t_proj = Math.max(0, Math.min(1, ((t.x - p1.x) * dx + (t.y - p1.y) * dy) / l2));
+        double cx = p1.x + t_proj * dx, cy = p1.y + t_proj * dy;
+        return (t.x - cx) * (t.x - cx) + (t.y - cy) * (t.y - cy);
     }
 
     // Getters and Setters ❤️
