@@ -353,7 +353,41 @@ public class Autopilot {
         }
 
         double nextSpeed = currentSpeed;
-        if (Double.isFinite(availableForwardPx) && closingPxPerTick > 0.0) {
+        boolean isLeadStationary = false;
+        
+        // 앞차가 정지해 있는지 판단 (상대 속도가 내 속도와 거의 같으면 앞차 속도는 0) ❤️
+        if (Double.isFinite(closingPxPerTick) && closingPxPerTick > 0.0) {
+            double relativeSpeedKmh = UnitConverter.msToKmh(
+                    UnitConverter.toMeter(closingPxPerTick) / UnitConverter.TICK_INTERVAL_SECONDS
+            );
+            // 내 속도와 상대 속도의 차이가 아주 작으면 앞차는 멈춘 것으로 간주
+            if (Math.abs(currentSpeed - relativeSpeedKmh) < 0.1) {
+                isLeadStationary = true;
+            }
+        }
+
+        // 정지 상황 특수 처리: 앞차가 정지해 있거나 아주 가까울 때 ❤️
+        if (isLeadStationary || (currentSpeed < 0.1 && Double.isFinite(availableForwardPx) && availableForwardPx < desiredSafetyPx)) {
+            double stationarySafetyPx = desiredSafetyPx; // 하드코딩(2.0m) 대신 운전자 성향 반영 ❤️
+            
+            if (availableForwardPx <= stationarySafetyPx) {
+                // 이미 정차 간격 이내라면 감속 성능 내에서 멈춤 (갑자기 0으로 변하는 현상 방지) ❤️
+                double maxBrakeKmhPerTick = vehicle.getType().getHardBrakeKmhPerTick();
+                nextSpeed = Math.max(0.0, currentSpeed - maxBrakeKmhPerTick);
+            } else if (closingPxPerTick > 0.0) {
+                // 다가가고 있다면 정지 간격을 목표로 브레이크 계산
+                double brakingDistanceM = Math.max(0.01, UnitConverter.toMeter(availableForwardPx - stationarySafetyPx));
+                double requiredBrakeMs2 = PhysicEngine.calculateRequiredBraking(currentSpeed, 0.0, brakingDistanceM);
+                double maxBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getHardBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
+                
+                double brakeMs2 = Math.min(maxBrakeMs2, requiredBrakeMs2);
+                nextSpeed = Math.min(currentSpeed, PhysicEngine.calculateSpeed(currentSpeed, -brakeMs2));
+            } else {
+                // 정지 목표 거리보다 멀지만 멈춰있는 경우, 가속하지 않고 현행 유지 (움찔거림 방지)
+                nextSpeed = currentSpeed;
+            }
+        } else if (Double.isFinite(availableForwardPx) && closingPxPerTick > 0.0) {
+            // 주행 중 브레이크 로직 (기존)
             double closingSpeedKmh = UnitConverter.msToKmh(
                     UnitConverter.toMeter(closingPxPerTick) / UnitConverter.TICK_INTERVAL_SECONDS
             );
@@ -362,11 +396,16 @@ public class Autopilot {
             double requiredBrakeMs2 = PhysicEngine.calculateRequiredBraking(currentSpeed, targetLeadSpeed, brakingDistanceM);
             double maxBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getHardBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
             
-            // 필요한 제동력만큼만 밟되, 차량의 최대 제동 성능(급브레이크)을 넘지 않도록 제한 ❤️
             double brakeMs2 = Math.min(maxBrakeMs2, requiredBrakeMs2);
             nextSpeed = Math.min(currentSpeed, PhysicEngine.calculateSpeed(currentSpeed, -brakeMs2));
         } else if (currentSpeed < targetSpeed) {
-            nextSpeed = Math.min(targetSpeed, currentSpeed + vehicle.getType().getAccelerationKmhPerTick());
+            // 가속 조건: 정지 목표 거리 근처가 아닐 때만 가속 (성향에 따른 떨림 방지 보정) ❤️
+            double accelerationBufferPx = UnitConverter.toPixel(1.0); // 1미터 여유
+            if (currentSpeed < 1.0 && Double.isFinite(availableForwardPx) && availableForwardPx < (desiredSafetyPx + accelerationBufferPx)) {
+                nextSpeed = currentSpeed; 
+            } else {
+                nextSpeed = Math.min(targetSpeed, currentSpeed + vehicle.getType().getAccelerationKmhPerTick());
+            }
         } else if (currentSpeed > targetSpeed) {
             nextSpeed = Math.max(targetSpeed, currentSpeed - vehicle.getType().getBrakeKmhPerTick());
         }
@@ -947,29 +986,50 @@ public class Autopilot {
         if (logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) return;
 
         Set<Lane> currentPhase = logicalRoute.get(currentPhaseIndex);
+        Point2D.Double p0 = new Point2D.Double(vehicle.getX(), vehicle.getY());
+        Lane nearestLane = findNearestLane(currentPhase, p0);
         Lane targetLane = null;
+
         if (currentPhaseIndex < logicalRoute.size() - 1) {
             Set<Lane> nextPhase = logicalRoute.get(currentPhaseIndex + 1);
-            for (Lane lane : currentPhase) {
-                Set<LaneConnection> conns = junctionController.getConnectionList(lane);
+            
+            // 1. 현재 차선에서 다음 도로로 갈 수 있는지 먼저 확인 ❤️
+            if (nearestLane != null) {
+                Set<LaneConnection> conns = junctionController.getConnectionList(nearestLane);
                 if (conns != null) {
                     for (LaneConnection conn : conns) {
                         if (nextPhase.contains(conn.targetLane())) {
-                            targetLane = lane;
+                            targetLane = nearestLane;
                             break;
                         }
                     }
                 }
-                if (targetLane != null) break;
+            }
+
+            // 2. 현재 차선에서 갈 수 없다면, 갈 수 있는 다른 차선을 찾음
+            if (targetLane == null) {
+                for (Lane lane : currentPhase) {
+                    Set<LaneConnection> conns = junctionController.getConnectionList(lane);
+                    if (conns != null) {
+                        for (LaneConnection conn : conns) {
+                            if (nextPhase.contains(conn.targetLane())) {
+                                targetLane = lane;
+                                break;
+                            }
+                        }
+                    }
+                    if (targetLane != null) break;
+                }
             }
         }
-        if (targetLane == null) targetLane = currentPhase.iterator().next();
+
+        // 3. 목적지이거나 갈 수 있는 차선을 못 찾았다면, 현재 차선을 유지 (떼지어 몰리는 현상 방지) ❤️
+        if (targetLane == null) {
+            targetLane = (nearestLane != null) ? nearestLane : currentPhase.iterator().next();
+        }
 
         double rad = Math.toRadians(vehicle.getAngle());
-        Point2D.Double p0 = new Point2D.Double(vehicle.getX(), vehicle.getY());
-
-        Lane currentLane = findNearestLane(currentPhase, p0);
-        if (currentLane == null) currentLane = targetLane;
+        Lane currentLane = (nearestLane != null) ? nearestLane : targetLane;
         if (currentLane == targetLane) {
             clearLaneChangePath();
             return;
