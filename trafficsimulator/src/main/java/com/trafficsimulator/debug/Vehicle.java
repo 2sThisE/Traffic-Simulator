@@ -77,8 +77,8 @@ public class Vehicle {
     /**
      * 오토파일럿 로직을 통해 차량의 위치를 업데이트합니다. ❤️
      */
-    public void updatePosition() {
-        autopilot.updatePosition();
+    public void updatePosition(JunctionController junctionController) {
+        autopilot.updatePosition(junctionController);
     }
 
     /**

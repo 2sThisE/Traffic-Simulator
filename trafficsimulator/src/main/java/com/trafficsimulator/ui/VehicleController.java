@@ -100,7 +100,7 @@ public class VehicleController {
         }
 
         for (Vehicle vehicle : vehicles) {
-            vehicle.updatePosition();
+            vehicle.updatePosition(junctionController);
             vehicle.updateVisionArea(roadManager, junctionController, vehicles);
             vehicle.updateDynamicPath(junctionController, vehicles);
         }

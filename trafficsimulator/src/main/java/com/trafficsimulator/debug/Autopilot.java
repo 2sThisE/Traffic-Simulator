@@ -27,6 +27,9 @@ public class Autopilot {
     private List<Set<Lane>> logicalRoute = new ArrayList<>(); // 차량이 주행 가능한 논리적 경로 세트
     private int currentPhaseIndex = 0; // 현재 주행 중인 도로 구간 인덱스
     private LaneConnection currentConnection = null; // 현재 교차로 통과 중인 경우 해당 연결 정보
+    private Lane laneChangeTargetLane = null;
+    private double laneChangePathDistance = 0.0;
+    private double connectionPathDistance = 0.0;
     
     // 시각적 렌더링을 위한 포인트 리스트 ❤️
     private List<Point2D.Double> forwardVisionArea = new ArrayList<>(); 
@@ -45,13 +48,45 @@ public class Autopilot {
     /**
      * 현재 속도(km/h)에 따른 1틱당 이동 거리(Pixel)를 계산하여 차량 위치를 업데이트합니다.
      */
-    public void updatePosition() {
+    public void updatePosition(JunctionController junctionController) {
         double ms = UnitConverter.kmhToMs(vehicle.getSpeedKmh());
         double pixelPerTick = UnitConverter.toPixelPerTick(ms);
-        
-        double rad = Math.toRadians(vehicle.getAngle());
-        vehicle.setX(vehicle.getX() + Math.cos(rad) * pixelPerTick);
-        vehicle.setY(vehicle.getY() + Math.sin(rad) * pixelPerTick);
+
+        if (isLaneChanging()) {
+            boolean reachedEnd = advanceAlongLaneChangePath(pixelPerTick);
+            if (reachedEnd) {
+                clearLaneChangePath();
+            }
+            return;
+        }
+
+        if (currentConnection != null && path != null && path.size() >= 2) {
+            boolean reachedEnd = advanceAlongConnectionPath(pixelPerTick);
+            if (reachedEnd) {
+                if (logicalRoute != null && currentPhaseIndex < logicalRoute.size() - 1) {
+                    currentPhaseIndex++;
+                }
+                clearConnectionPath();
+            }
+            return;
+        }
+
+        if (logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) {
+            moveStraight(pixelPerTick);
+            return;
+        }
+
+        Point2D.Double currentPos = new Point2D.Double(vehicle.getX(), vehicle.getY());
+        Lane currentLane = findNearestLane(logicalRoute.get(currentPhaseIndex), currentPos);
+        if (currentLane == null) {
+            moveStraight(pixelPerTick);
+            return;
+        }
+
+        boolean reachedEnd = advanceAlongLanePath(currentLane, currentPos, pixelPerTick);
+        if (reachedEnd) {
+            beginConnectionToNextPhase(currentLane, junctionController);
+        }
     }
 
     /**
@@ -310,6 +345,199 @@ public class Autopilot {
     private double getDistanceSqToPath(Lane lane, Point2D.Double pos) {
         return getProjectionAndDistanceSq(lane, pos)[1];
     }
+
+    private void moveStraight(double pixelPerTick) {
+        double rad = Math.toRadians(vehicle.getAngle());
+        vehicle.setX(vehicle.getX() + Math.cos(rad) * pixelPerTick);
+        vehicle.setY(vehicle.getY() + Math.sin(rad) * pixelPerTick);
+    }
+
+    private boolean advanceAlongLanePath(Lane lane, Point2D.Double currentPos, double pixelPerTick) {
+        List<Point2D.Double> orderedPath = getOrderedLanePath(lane);
+        if (orderedPath.size() < 2) {
+            moveStraight(pixelPerTick);
+            return false;
+        }
+
+        double currentDistance = getProjectionDistanceOnPath(orderedPath, currentPos);
+        double pathLength = getPathLength(orderedPath);
+        double nextDistance = Math.min(pathLength, currentDistance + pixelPerTick);
+        PointOnPath nextPoint = getPointAtDistance(orderedPath, nextDistance);
+        if (nextPoint == null) {
+            moveStraight(pixelPerTick);
+            return false;
+        }
+
+        vehicle.setX(nextPoint.point.x);
+        vehicle.setY(nextPoint.point.y);
+        vehicle.setAngle(nextPoint.angleDeg);
+        return nextDistance >= pathLength - 0.1;
+    }
+
+    private boolean advanceAlongLaneChangePath(double pixelPerTick) {
+        double pathLength = getPathLength(path);
+        if (pathLength <= 0) {
+            return true;
+        }
+
+        laneChangePathDistance = Math.min(pathLength, laneChangePathDistance + pixelPerTick);
+        PointOnPath nextPoint = getPointAtDistance(path, laneChangePathDistance);
+        if (nextPoint == null) {
+            moveStraight(pixelPerTick);
+            return false;
+        }
+
+        double nextRad = Math.toRadians(nextPoint.angleDeg);
+        vehicle.setX(nextPoint.point.x - Math.cos(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setY(nextPoint.point.y - Math.sin(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setAngle(nextPoint.angleDeg);
+        return laneChangePathDistance >= pathLength - 0.1;
+    }
+
+    private boolean advanceAlongConnectionPath(double pixelPerTick) {
+        double pathLength = getPathLength(path);
+        if (pathLength <= 0) {
+            return true;
+        }
+
+        connectionPathDistance = Math.min(pathLength, connectionPathDistance + pixelPerTick);
+        PointOnPath nextPoint = getPointAtDistance(path, connectionPathDistance);
+        if (nextPoint == null) {
+            moveStraight(pixelPerTick);
+            return false;
+        }
+
+        double nextRad = Math.toRadians(nextPoint.angleDeg);
+        vehicle.setX(nextPoint.point.x - Math.cos(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setY(nextPoint.point.y - Math.sin(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setAngle(nextPoint.angleDeg);
+        return connectionPathDistance >= pathLength - 0.1;
+    }
+
+    private void beginConnectionToNextPhase(Lane currentLane, JunctionController junctionController) {
+        if (junctionController == null || logicalRoute == null || currentPhaseIndex >= logicalRoute.size() - 1) {
+            return;
+        }
+
+        Set<Lane> nextPhase = logicalRoute.get(currentPhaseIndex + 1);
+        Set<LaneConnection> connections = junctionController.getConnectionList(currentLane);
+        if (connections == null) {
+            currentPhaseIndex++;
+            return;
+        }
+
+        for (LaneConnection connection : connections) {
+            if (nextPhase.contains(connection.targetLane())) {
+                currentConnection = connection;
+                path = new ArrayList<>(connection.connectionPath());
+                connectionPathDistance = 0.0;
+                updatePathArea();
+                return;
+            }
+        }
+
+        currentPhaseIndex++;
+    }
+
+    private void clearConnectionPath() {
+        this.path = new ArrayList<>();
+        this.currentConnection = null;
+        this.connectionPathDistance = 0.0;
+        updatePathArea();
+    }
+
+    private boolean isLaneChanging() {
+        return laneChangeTargetLane != null && path != null && path.size() >= 2;
+    }
+
+    private void beginLaneChangePath(List<Point2D.Double> newPath, Lane targetLane) {
+        this.path = newPath;
+        this.laneChangeTargetLane = targetLane;
+        this.laneChangePathDistance = 0.0;
+        updatePathArea();
+    }
+
+    private void clearLaneChangePath() {
+        this.path = new ArrayList<>();
+        this.laneChangeTargetLane = null;
+        this.laneChangePathDistance = 0.0;
+        updatePathArea();
+    }
+
+    private List<Point2D.Double> getOrderedLanePath(Lane lane) {
+        List<Point2D.Double> orderedPath = new ArrayList<>(lane.getLanePath());
+        if (!lane.isRoadDirection()) {
+            Collections.reverse(orderedPath);
+        }
+        return orderedPath;
+    }
+
+    private double getProjectionDistanceOnPath(List<Point2D.Double> path, Point2D.Double pos) {
+        double accumulatedDist = 0;
+        double bestDistance = 0;
+        double minDistSq = Double.MAX_VALUE;
+
+        for (int i = 0; i < path.size() - 1; i++) {
+            Point2D.Double p1 = path.get(i);
+            Point2D.Double p2 = path.get(i + 1);
+            double dx = p2.x - p1.x;
+            double dy = p2.y - p1.y;
+            double segmentLengthSq = dx * dx + dy * dy;
+            if (segmentLengthSq == 0) continue;
+
+            double t = ((pos.x - p1.x) * dx + (pos.y - p1.y) * dy) / segmentLengthSq;
+            t = Math.max(0, Math.min(1, t));
+            double projectedX = p1.x + t * dx;
+            double projectedY = p1.y + t * dy;
+            double distSq = (pos.x - projectedX) * (pos.x - projectedX) + (pos.y - projectedY) * (pos.y - projectedY);
+
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                bestDistance = accumulatedDist + Math.sqrt(segmentLengthSq) * t;
+            }
+            accumulatedDist += Math.sqrt(segmentLengthSq);
+        }
+
+        return bestDistance;
+    }
+
+    private double getPathLength(List<Point2D.Double> path) {
+        double length = 0;
+        for (int i = 0; i < path.size() - 1; i++) {
+            length += path.get(i).distance(path.get(i + 1));
+        }
+        return length;
+    }
+
+    private PointOnPath getPointAtDistance(List<Point2D.Double> path, double targetDistance) {
+        double accumulatedDist = 0;
+
+        for (int i = 0; i < path.size() - 1; i++) {
+            Point2D.Double p1 = path.get(i);
+            Point2D.Double p2 = path.get(i + 1);
+            double segmentLength = p1.distance(p2);
+            if (segmentLength == 0) continue;
+
+            if (accumulatedDist + segmentLength >= targetDistance) {
+                double ratio = Math.max(0, Math.min(1, (targetDistance - accumulatedDist) / segmentLength));
+                Point2D.Double point = new Point2D.Double(
+                        p1.x + (p2.x - p1.x) * ratio,
+                        p1.y + (p2.y - p1.y) * ratio
+                );
+                double angleDeg = Math.toDegrees(Math.atan2(p2.y - p1.y, p2.x - p1.x));
+                return new PointOnPath(point, angleDeg);
+            }
+
+            accumulatedDist += segmentLength;
+        }
+
+        Point2D.Double last = path.get(path.size() - 1);
+        Point2D.Double prev = path.get(path.size() - 2);
+        double angleDeg = Math.toDegrees(Math.atan2(last.y - prev.y, last.x - prev.x));
+        return new PointOnPath(new Point2D.Double(last.x, last.y), angleDeg);
+    }
+
+    private record PointOnPath(Point2D.Double point, double angleDeg) {}
 
     private List<Point2D.Double> traceRoutePath(Lane startLane, Point2D.Double startPos, double totalDist, int startPhaseIdx, JunctionController junctionController) {
         List<Point2D.Double> traced = new ArrayList<>();
@@ -617,6 +845,7 @@ public class Autopilot {
             vehicle.setAngle(bestAngle);
             this.currentPhaseIndex = bestPhase;
             this.currentConnection = bestConn;
+            this.connectionPathDistance = 0.0;
         } else if (path != null && !path.isEmpty()) {
             for (int i = 0; i < path.size() - 1; i++) {
                 Point2D.Double p1 = path.get(i);
@@ -639,6 +868,11 @@ public class Autopilot {
     }
 
     public void updateDynamicPath(JunctionController junctionController) {
+        if (isLaneChanging()) {
+            updatePathArea();
+            return;
+        }
+
         if (currentConnection != null) {
             this.path = new ArrayList<>(currentConnection.connectionPath());
             updatePathArea();
@@ -675,8 +909,7 @@ public class Autopilot {
         Lane currentLane = findNearestLane(currentPhase, p0);
         if (currentLane == null) currentLane = targetLane;
         if (currentLane == targetLane) {
-            this.path = new ArrayList<>();
-            updatePathArea();
+            clearLaneChangePath();
             return;
         }
 
@@ -708,7 +941,16 @@ public class Autopilot {
             if (!isGapSafe) stepTargetLane = currentLane; // 위험하면 일단 유지
         }
 
+        if (stepTargetLane == currentLane) {
+            clearLaneChangePath();
+            return;
+        }
+
         List<Point2D.Double> orderedPoints = stepTargetLane.getLanePath();
+        if (orderedPoints == null || orderedPoints.size() < 2) {
+            clearLaneChangePath();
+            return;
+        }
         boolean reverse = !stepTargetLane.isRoadDirection();
         int size = orderedPoints.size();
 
@@ -754,10 +996,15 @@ public class Autopilot {
         double dist = p0.distance(p3), weight = dist / 2.5;
         Point2D.Double p1 = new Point2D.Double(p0.x + Math.cos(rad) * weight, p0.y + Math.sin(rad) * weight);
         double len2 = Math.sqrt(p2_dir.x * p2_dir.x + p2_dir.y * p2_dir.y);
+        if (len2 == 0) {
+            clearLaneChangePath();
+            return;
+        }
         Point2D.Double p2 = new Point2D.Double(p3.x - (p2_dir.x / len2) * weight, p3.y - (p2_dir.y / len2) * weight);
 
-        this.path = new ArrayList<>();
-        for (int i = 0; i <= 30; i++) this.path.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
+        List<Point2D.Double> newPath = new ArrayList<>();
+        for (int i = 0; i <= 30; i++) newPath.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
+        beginLaneChangePath(newPath, stepTargetLane);
         
         updatePathArea(); // 궤적 영역 업데이트 ❤️
     }
