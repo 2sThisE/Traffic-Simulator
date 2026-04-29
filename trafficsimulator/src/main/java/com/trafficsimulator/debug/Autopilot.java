@@ -15,6 +15,7 @@ import com.trafficsimulator.road.LaneConnection;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.TrafficLaw;
 import com.trafficsimulator.ui.RoadManager;
+import com.trafficsimulator.util.PhysicEngine;
 import com.trafficsimulator.util.UnitConverter;
 
 /**
@@ -41,6 +42,9 @@ public class Autopilot {
     private Area lastForwardVisionArea = new Area(); 
     private Area lastSideVisionArea = new Area(); 
     private Area lastVehicleVisionArea = new Area(); 
+    private double previousVehicleVisionDistancePx = Double.NaN;
+    private double currentVehicleVisionDistancePx = Double.POSITIVE_INFINITY;
+    private double desiredSafetyDistancePx = 0.0;
 
     public Autopilot(Vehicle vehicle) {
         this.vehicle = vehicle;
@@ -253,15 +257,18 @@ public class Autopilot {
         fillVisionList(sideVisionArea, sideVision); 
 
         // 3. 전방 차량 감지 영역 (안전거리용) ❤️
-        double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh());
+        double safetyDistM = TrafficLaw.getRecommendedSafetyDistance(vehicle.getSpeedKmh())
+                * vehicle.getDriverPersonality().getSafetyDistanceRatio();
         safetyDistM = Math.min(safetyDistM, 100.0); 
         double safetyDistPx = UnitConverter.toPixel(safetyDistM);
+        double detectionDistPx = UnitConverter.toPixel(300.0);
+        desiredSafetyDistancePx = safetyDistPx;
         
-        double adjustedSafetyDistPx = safetyDistPx;
-        double maxSafetyDistSqForCheck = (safetyDistPx + UnitConverter.toPixel(40.0)) * (safetyDistPx + UnitConverter.toPixel(40.0));
+        double adjustedSafetyDistPx = detectionDistPx;
+        double maxSafetyDistSqForCheck = (detectionDistPx + UnitConverter.toPixel(40.0)) * (detectionDistPx + UnitConverter.toPixel(40.0));
         
         // 최적화: 루프 밖에서 공통 전방 경로 한 번만 추적
-        List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, safetyDistPx, currentPhaseIndex, junctionController);
+        List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, detectionDistPx, currentPhaseIndex, junctionController);
 
         if (fullTraced != null && fullTraced.size() >= 2) {
             for (Vehicle other : allVehicles) {
@@ -303,7 +310,10 @@ public class Autopilot {
             }
         }
 
-        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, frontPos, adjustedSafetyDistPx, currentPhaseIndex, junctionController);
+        previousVehicleVisionDistancePx = currentVehicleVisionDistancePx;
+        currentVehicleVisionDistancePx = adjustedSafetyDistPx;
+
+        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, frontPos, Math.min(adjustedSafetyDistPx, safetyDistPx), currentPhaseIndex, junctionController);
         Area vehicleVision = new Area();
         if (tracedPath != null && tracedPath.size() >= 2) {
             addPathToArea(vehicleVision, tracedPath, halfWidth);
@@ -311,6 +321,56 @@ public class Autopilot {
         
         this.lastVehicleVisionArea = vehicleVision; 
         fillVisionList(vehicleVisionArea, vehicleVision); 
+    }
+
+    public void updateSpeedControl(RoadManager roadManager) {
+        if (routeFinished || logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) {
+            return;
+        }
+
+        Point2D.Double currentPos = new Point2D.Double(vehicle.getX(), vehicle.getY());
+        Lane currentLane = findNearestLane(logicalRoute.get(currentPhaseIndex), currentPos);
+        if (currentLane == null) {
+            return;
+        }
+
+        Road currentRoad = roadManager.findRoadByLane(currentLane);
+        if (currentRoad == null) {
+            return;
+        }
+
+        double targetSpeed = currentRoad.getLimitSpeed();
+        if (!vehicle.getDriverPersonality().isStrictLawAdherence()) {
+            targetSpeed += vehicle.getDriverPersonality().getMaxSpeedOffset();
+        }
+
+        double currentSpeed = vehicle.getSpeedKmh();
+        double desiredSafetyPx = desiredSafetyDistancePx;
+        double availableForwardPx = currentVehicleVisionDistancePx;
+        double closingPxPerTick = 0.0;
+        if (Double.isFinite(previousVehicleVisionDistancePx) && Double.isFinite(currentVehicleVisionDistancePx)) {
+            closingPxPerTick = Math.max(0.0, previousVehicleVisionDistancePx - currentVehicleVisionDistancePx);
+        }
+
+        double nextSpeed = currentSpeed;
+        if (Double.isFinite(availableForwardPx) && closingPxPerTick > 0.0) {
+            double closingSpeedKmh = UnitConverter.msToKmh(
+                    UnitConverter.toMeter(closingPxPerTick) / UnitConverter.TICK_INTERVAL_SECONDS
+            );
+            double targetLeadSpeed = Math.max(0.0, currentSpeed - closingSpeedKmh);
+            double brakingDistanceM = Math.max(0.5, UnitConverter.toMeter(availableForwardPx - desiredSafetyPx));
+            double requiredBrakeMs2 = PhysicEngine.calculateRequiredBraking(currentSpeed, targetLeadSpeed, brakingDistanceM);
+            double maxBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getHardBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
+            double normalBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
+            double brakeMs2 = Math.min(maxBrakeMs2, Math.max(normalBrakeMs2, requiredBrakeMs2));
+            nextSpeed = Math.min(currentSpeed, PhysicEngine.calculateSpeed(currentSpeed, -brakeMs2));
+        } else if (currentSpeed < targetSpeed) {
+            nextSpeed = Math.min(targetSpeed, currentSpeed + vehicle.getType().getAccelerationKmhPerTick());
+        } else if (currentSpeed > targetSpeed) {
+            nextSpeed = Math.max(targetSpeed, currentSpeed - vehicle.getType().getBrakeKmhPerTick());
+        }
+
+        vehicle.setSpeedKmh(nextSpeed);
     }
 
     private double[] getProjectionAndDistanceSq(Lane lane, Point2D.Double pos) {

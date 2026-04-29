@@ -103,12 +103,13 @@ public class VehicleController {
         Iterator<Vehicle> iterator = vehicles.iterator();
         while (iterator.hasNext()) {
             Vehicle vehicle = iterator.next();
+            vehicle.updateVisionArea(roadManager, junctionController, vehicles);
+            vehicle.updateSpeedControl(roadManager);
             vehicle.updatePosition(junctionController);
             if (vehicle.isRouteFinished()) {
                 iterator.remove();
                 continue;
             }
-            vehicle.updateVisionArea(roadManager, junctionController, vehicles);
             vehicle.updateDynamicPath(junctionController, vehicles);
         }
     }

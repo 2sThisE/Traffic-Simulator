@@ -88,6 +88,10 @@ public class Vehicle {
         autopilot.updateVisionArea(roadManager, junctionController, vehicles);
     }
 
+    public void updateSpeedControl(RoadManager roadManager) {
+        autopilot.updateSpeedControl(roadManager);
+    }
+
     /**
      * 특정 좌표와 가장 가까운 경로상의 위치로 차량을 이동시킵니다.
      */
