@@ -112,20 +112,31 @@ public class CanvasRenderer {
     }
 
     /**
-     * 차량이 따라갈 경로를 점으로 그립니다.
+     * 차량이 따라갈 경로와 궤적 영역을 그립니다. ❤️
      */
     private void drawVehiclePath(GraphicsContext gc, Vehicle v, double zoom) {
-        List<Point2D.Double> path = v.getPath();
-        if (path == null || path.isEmpty()) return;
+        // 1. 궤적 영역 (pathArea) 그리기 - 반투명 빨간색 ❤️
+        java.awt.geom.Area area = v.getAutopilot().getPathArea();
+        if (area != null && !area.isEmpty()) {
+            gc.save();
+            gc.setFill(Color.web("#e74c3c", 0.3)); // 반투명 빨간색
+            gc.setStroke(Color.web("#e74c3c", 0.6));
+            gc.setLineWidth(1.0 / zoom);
 
-        gc.save();
-        gc.setFill(Color.WHITE.deriveColor(0, 1, 1, 0.5)); // 반투명 흰색
-        double dotSize = 3.0 / zoom;
-
-        for (Point2D.Double pt : path) {
-            gc.fillOval(pt.x - dotSize / 2, pt.y - dotSize / 2, dotSize, dotSize);
+            java.awt.geom.PathIterator pi = area.getPathIterator(null);
+            double[] coords = new double[6];
+            gc.beginPath();
+            while (!pi.isDone()) {
+                int type = pi.currentSegment(coords);
+                if (type == java.awt.geom.PathIterator.SEG_MOVETO) gc.moveTo(coords[0], coords[1]);
+                else if (type == java.awt.geom.PathIterator.SEG_LINETO) gc.lineTo(coords[0], coords[1]);
+                else if (type == java.awt.geom.PathIterator.SEG_CLOSE) gc.closePath();
+                pi.next();
+            }
+            gc.fill();
+            gc.stroke();
+            gc.restore();
         }
-        gc.restore();
     }
 
     /**

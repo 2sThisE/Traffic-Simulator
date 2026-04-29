@@ -23,6 +23,7 @@ import com.trafficsimulator.util.UnitConverter;
 public class Autopilot {
     private final Vehicle vehicle;
     private List<Point2D.Double> path = new ArrayList<>(); // 차량이 따라갈 시각적 경로
+    private Area pathArea = new Area(); // 차량의 폭을 고려한 주행 궤적 영역 ❤️
     private List<Set<Lane>> logicalRoute = new ArrayList<>(); // 차량이 주행 가능한 논리적 경로 세트
     private int currentPhaseIndex = 0; // 현재 주행 중인 도로 구간 인덱스
     private LaneConnection currentConnection = null; // 현재 교차로 통과 중인 경우 해당 연결 정보
@@ -640,6 +641,7 @@ public class Autopilot {
     public void updateDynamicPath(JunctionController junctionController) {
         if (currentConnection != null) {
             this.path = new ArrayList<>(currentConnection.connectionPath());
+            updatePathArea();
             return;
         }
 
@@ -674,38 +676,36 @@ public class Autopilot {
         if (currentLane == null) currentLane = targetLane;
         if (currentLane == targetLane) {
             this.path = new ArrayList<>();
+            updatePathArea();
             return;
         }
 
         Lane stepTargetLane = findStepTargetLane(currentPhase, currentLane, targetLane);
         double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
 
+        // [영역 기반 충돌 및 빈 공간 판단] ❤️
         if (stepTargetLane != currentLane && lastSideVisionArea != null) {
             double minLookahead = UnitConverter.toPixel(15.0);
-            double safeLimit = 0;
-            double checkStep = UnitConverter.toPixel(1.0);
-            List<Point2D.Double> checkPath = getLaneSubPath(stepTargetLane, p0, 0, lookaheadDist, junctionController);
-            if (checkPath != null && checkPath.size() >= 2) {
-                double accumulated = 0;
-                boolean blocked = false;
-                for (int i = 0; i < checkPath.size() - 1; i++) {
-                    Point2D.Double p1 = checkPath.get(i);
-                    Point2D.Double p2 = checkPath.get(i + 1);
-                    double dist = p1.distance(p2);
-                    int steps = (int) Math.max(1, Math.ceil(dist / checkStep));
-                    for(int s = 0; s <= steps; s++) {
-                        double ratio = s / (double)steps;
-                        if (!lastSideVisionArea.contains(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio)) {
-                            blocked = true; break;
-                        }
-                        safeLimit = accumulated + dist * ratio;
-                    }
-                    if (blocked) break;
-                    accumulated += dist;
+            boolean isGapSafe = false;
+            
+            // 옆 차선에 대한 주행 경로 영역 생성 시도
+            List<Point2D.Double> testPoints = getLaneSubPath(stepTargetLane, p0, 0, lookaheadDist, junctionController);
+            if (testPoints != null && testPoints.size() >= 2) {
+                Area testArea = new Area();
+                addPathToArea(testArea, testPoints, vehicle.getHeight() / 2.0 + UnitConverter.toPixel(0.5));
+                
+                // 감지 영역(Vision) 내에 이 궤적이 포함되는지 확인 (즉, 비어있는지)
+                Area collisionCheck = new Area(testArea);
+                collisionCheck.subtract(lastSideVisionArea);
+                
+                if (collisionCheck.isEmpty()) {
+                    isGapSafe = true; // 궤적 전체가 비어있는 공간(Vision Area) 안에 있음
+                } else {
+                    lookaheadDist = Math.max(minLookahead, lookaheadDist * 0.7); 
                 }
-                if (blocked && safeLimit < minLookahead) stepTargetLane = currentLane;
-                else if (blocked) lookaheadDist = Math.min(lookaheadDist, safeLimit);
-            } else stepTargetLane = currentLane;
+            }
+            
+            if (!isGapSafe) stepTargetLane = currentLane; // 위험하면 일단 유지
         }
 
         List<Point2D.Double> orderedPoints = stepTargetLane.getLanePath();
@@ -758,7 +758,21 @@ public class Autopilot {
 
         this.path = new ArrayList<>();
         for (int i = 0; i <= 30; i++) this.path.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
+        
+        updatePathArea(); // 궤적 영역 업데이트 ❤️
     }
+
+    private void updatePathArea() {
+        if (path == null || path.size() < 2) {
+            pathArea = new Area();
+            return;
+        }
+        Area newArea = new Area();
+        addPathToArea(newArea, path, vehicle.getHeight() / 2.0);
+        this.pathArea = newArea;
+    }
+
+    public Area getPathArea() { return pathArea; }
 
     private Lane findStepTargetLane(Set<Lane> currentPhase, Lane currentLane, Lane targetLane) {
         Point2D.Double targetStart = targetLane.getLanePath().get(0), currentStart = currentLane.getLanePath().get(0);
