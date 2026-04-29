@@ -988,79 +988,88 @@ public class Autopilot {
         Set<Lane> currentPhase = logicalRoute.get(currentPhaseIndex);
         Point2D.Double p0 = new Point2D.Double(vehicle.getX(), vehicle.getY());
         Lane nearestLane = findNearestLane(currentPhase, p0);
-        Lane targetLane = null;
+        Lane routeTargetLane = null;
 
         if (currentPhaseIndex < logicalRoute.size() - 1) {
             Set<Lane> nextPhase = logicalRoute.get(currentPhaseIndex + 1);
-            
-            // 1. 현재 차선에서 다음 도로로 갈 수 있는지 먼저 확인 ❤️
             if (nearestLane != null) {
                 Set<LaneConnection> conns = junctionController.getConnectionList(nearestLane);
                 if (conns != null) {
                     for (LaneConnection conn : conns) {
                         if (nextPhase.contains(conn.targetLane())) {
-                            targetLane = nearestLane;
+                            routeTargetLane = nearestLane;
                             break;
                         }
                     }
                 }
             }
-
-            // 2. 현재 차선에서 갈 수 없다면, 갈 수 있는 다른 차선을 찾음
-            if (targetLane == null) {
+            if (routeTargetLane == null) {
                 for (Lane lane : currentPhase) {
                     Set<LaneConnection> conns = junctionController.getConnectionList(lane);
                     if (conns != null) {
                         for (LaneConnection conn : conns) {
                             if (nextPhase.contains(conn.targetLane())) {
-                                targetLane = lane;
+                                routeTargetLane = lane;
                                 break;
                             }
                         }
                     }
-                    if (targetLane != null) break;
+                    if (routeTargetLane != null) break;
                 }
             }
         }
 
-        // 3. 목적지이거나 갈 수 있는 차선을 못 찾았다면, 현재 차선을 유지 (떼지어 몰리는 현상 방지) ❤️
-        if (targetLane == null) {
-            targetLane = (nearestLane != null) ? nearestLane : currentPhase.iterator().next();
+        if (routeTargetLane == null) {
+            routeTargetLane = (nearestLane != null) ? nearestLane : currentPhase.iterator().next();
         }
 
         double rad = Math.toRadians(vehicle.getAngle());
-        Lane currentLane = (nearestLane != null) ? nearestLane : targetLane;
-        if (currentLane == targetLane) {
-            clearLaneChangePath();
-            return;
-        }
-
-        Lane stepTargetLane = findStepTargetLane(currentPhase, currentLane, targetLane);
+        Lane currentLane = (nearestLane != null) ? nearestLane : routeTargetLane;
+        
+        Lane stepTargetLane = currentLane;
         double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
+        
+        // [지능형 차선 변경 (추월) 판단] ❤️
+        boolean needRouteChange = (currentLane != routeTargetLane);
+        
+        // 현실적인 추월 판단 로직: 고정 수치 대신 TTC(Time-To-Collision) 개념 도입 ❤️
+        double currentSpeedMs = UnitConverter.kmhToMs(vehicle.getSpeedKmh());
+        double timeToReachFrontSec = UnitConverter.toMeter(currentVehicleVisionDistancePx) / Math.max(1.0, currentSpeedMs);
+        double decisionTimeSec = 2.0 + (1.0 - vehicle.getDriverPersonality().getSafetyDistanceRatio()) * 5.0;
+        
+        boolean isBlockedByFront = Double.isFinite(currentVehicleVisionDistancePx) && 
+                                   (timeToReachFrontSec <= decisionTimeSec || currentVehicleVisionDistancePx <= (desiredSafetyDistancePx * 2.0));
 
-        // [영역 기반 충돌 및 빈 공간 판단] ❤️
-        if (stepTargetLane != currentLane && lastSideVisionArea != null) {
-            double minLookahead = UnitConverter.toPixel(15.0);
-            boolean isGapSafe = false;
-            
-            // 옆 차선에 대한 주행 경로 영역 생성 시도
-            List<Point2D.Double> testPoints = getLaneSubPath(stepTargetLane, p0, 0, lookaheadDist, junctionController);
-            if (testPoints != null && testPoints.size() >= 2) {
-                Area testArea = new Area();
-                addPathToArea(testArea, testPoints, vehicle.getHeight() / 2.0 + UnitConverter.toPixel(0.5));
-                
-                // 감지 영역(Vision) 내에 이 궤적이 포함되는지 확인 (즉, 비어있는지)
-                Area collisionCheck = new Area(testArea);
-                collisionCheck.subtract(lastSideVisionArea);
-                
-                if (collisionCheck.isEmpty()) {
-                    isGapSafe = true; // 궤적 전체가 비어있는 공간(Vision Area) 안에 있음
-                } else {
-                    lookaheadDist = Math.max(minLookahead, lookaheadDist * 0.7); 
+        List<Lane> adjacentLanes = getAdjacentLanes(currentPhase, currentLane, p0);
+        Lane primaryAdjacent = null;
+        Lane secondaryAdjacent = null;
+
+        if (needRouteChange) {
+            primaryAdjacent = findStepTargetLane(currentPhase, currentLane, routeTargetLane);
+            for (Lane adj : adjacentLanes) {
+                if (adj != primaryAdjacent) {
+                    secondaryAdjacent = adj;
+                    break;
                 }
             }
-            
-            if (!isGapSafe) stepTargetLane = currentLane; // 위험하면 일단 유지
+        } else if (isBlockedByFront && !adjacentLanes.isEmpty()) {
+            primaryAdjacent = adjacentLanes.get(0);
+            if (adjacentLanes.size() > 1) secondaryAdjacent = adjacentLanes.get(1);
+        }
+
+        boolean foundGap = false;
+        
+        if (primaryAdjacent != null && primaryAdjacent != currentLane) {
+            if (checkLaneGapSafe(primaryAdjacent, p0, lookaheadDist, junctionController)) {
+                stepTargetLane = primaryAdjacent;
+                foundGap = true;
+            }
+        }
+        
+        if (!foundGap && isBlockedByFront && secondaryAdjacent != null && secondaryAdjacent != currentLane) {
+            if (checkLaneGapSafe(secondaryAdjacent, p0, lookaheadDist, junctionController)) {
+                stepTargetLane = secondaryAdjacent;
+            }
         }
 
         if (stepTargetLane == currentLane) {
@@ -1129,6 +1138,36 @@ public class Autopilot {
         beginLaneChangePath(newPath, stepTargetLane);
         
         updatePathArea(); // 궤적 영역 업데이트 ❤️
+    }
+
+    private boolean checkLaneGapSafe(Lane targetLane, Point2D.Double p0, double lookaheadDist, JunctionController junctionController) {
+        if (lastSideVisionArea == null || lastSideVisionArea.isEmpty()) return false;
+        double minLookahead = UnitConverter.toPixel(15.0);
+        List<Point2D.Double> testPoints = getLaneSubPath(targetLane, p0, 0, Math.max(minLookahead, lookaheadDist), junctionController);
+        if (testPoints != null && testPoints.size() >= 2) {
+            Area testArea = new Area();
+            addPathToArea(testArea, testPoints, vehicle.getHeight() / 2.0 + UnitConverter.toPixel(0.5));
+            Area collisionCheck = new Area(testArea);
+            collisionCheck.subtract(lastSideVisionArea);
+            return collisionCheck.isEmpty();
+        }
+        return false;
+    }
+
+    private List<Lane> getAdjacentLanes(Set<Lane> currentPhase, Lane currentLane, Point2D.Double p0) {
+        List<Lane> adj = new ArrayList<>();
+        double laneWidthPx = UnitConverter.toPixel(3.5);
+        double maxDistSq = (laneWidthPx * 1.8) * (laneWidthPx * 1.8);
+        double minDistSq = (laneWidthPx * 0.5) * (laneWidthPx * 0.5);
+        
+        for (Lane lane : currentPhase) {
+            if (lane == currentLane) continue;
+            double distSq = getDistanceSqToPath(lane, p0);
+            if (distSq > minDistSq && distSq < maxDistSq) {
+                adj.add(lane);
+            }
+        }
+        return adj;
     }
 
     private void updatePathArea() {
