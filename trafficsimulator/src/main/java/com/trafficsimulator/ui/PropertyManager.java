@@ -428,8 +428,7 @@ public class PropertyManager {
             Button delBtn = new Button("Del");
             delBtn.setStyle("-fx-text-fill: red;");
             delBtn.setOnAction(e -> {
-                junctionController.removeLaneConnections(lane);
-                road.deleteLane(index);
+                roadManager.removeLane(road, index, junctionController);
                 refreshAll(road);
             });
             
@@ -488,10 +487,9 @@ public class PropertyManager {
             delLaneBtn.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white; -fx-font-weight: bold;");
             delLaneBtn.setMaxWidth(Double.MAX_VALUE);
             delLaneBtn.setOnAction(e -> {
-                junctionController.removeLaneConnections(lane);
                 int idx = road.getLaneNum(lane);
                 if (idx != -1) {
-                    road.deleteLane(idx);
+                    roadManager.removeLane(road, idx, junctionController);
                     selectionManager.clearSelection();
                     refreshAll(road);
                 }

@@ -1,19 +1,16 @@
 package com.trafficsimulator.ui;
 
 import java.awt.geom.Point2D;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import com.trafficsimulator.debug.Vehicle;
 import com.trafficsimulator.road.JunctionController;
-import com.trafficsimulator.road.Lane; // 추가 ❤️
+import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.camera.Camera;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightController;
 import com.trafficsimulator.util.GlobalTimer;
-import com.trafficsimulator.util.Navigate;
 import com.trafficsimulator.vehicle.VehicleType;
 
 import javafx.fxml.FXML;
@@ -54,12 +51,12 @@ public class SimulatorController {
     private EditorModeManager modeManager;
     private KeyboardHandler keyboardHandler;
     private CanvasTransformHandler transformHandler;
+    private VehicleController vehicleController;
 
-    private List<Vehicle> vehicles = new ArrayList<>(); 
     private boolean isSimulationRunning = false; 
-    private boolean isDraggingObject = false; // 신호등/카메라 드래그용 ❤️
-    private boolean isDraggingVehicle = false; // 차량 드래그용 추가
-    private boolean isDebugMode = false; // 디버그 모드 플래그 추가 ❤️
+    private boolean isDraggingObject = false;
+    private boolean isDraggingVehicle = false;
+    private boolean isDebugMode = false;
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
@@ -71,9 +68,11 @@ public class SimulatorController {
         selectionManager = new SelectionManager();
         junctionController = new JunctionController();
         trafficLightController = new TrafficLightController();
+        vehicleController = new VehicleController(roadManager, junctionController);
         
         globalTimer = new GlobalTimer();
         globalTimer.addTickListener(trafficLightController);
+        globalTimer.addTickListener(vehicleController::onTick);
         globalTimer.addTickListener(() -> {
             javafx.application.Platform.runLater(() -> {
                 double seconds = com.trafficsimulator.util.GlobalTimer.ticksToSeconds(globalTimer.getTotalTicks());
@@ -133,6 +132,7 @@ public class SimulatorController {
         statusLabel.setText("Simulation Running... (Editing Locked)");
         statusLabel.setStyle("-fx-text-fill: #2ecc71;");
         
+        vehicleController.prepareSimulation();
         trafficLightController.getTrafficLights().clear();
         for (TrafficLight tl : roadManager.getTrafficLightList()) {
             tl.resetCurrentTick();
@@ -177,7 +177,7 @@ public class SimulatorController {
 
     public void setDebugMode(boolean debugMode) {
         this.isDebugMode = debugMode;
-        setupComponentTree(); // 컴포넌트 트리 갱신 ❤️
+        setupComponentTree();
     }
 
     private void setupComponentTree() {
@@ -188,7 +188,7 @@ public class SimulatorController {
         root.getChildren().add(new TreeItem<>("Camera")); 
         
         if (isDebugMode) {
-            root.getChildren().add(new TreeItem<>("Vehicle")); // 디버그 모드일 때만 차량 추가 가능 ❤️
+            root.getChildren().add(new TreeItem<>("Vehicle"));
         }
         
         componentTreeView.setRoot(root);
@@ -216,26 +216,19 @@ public class SimulatorController {
             Point2D.Double worldPt = drawingTool.screenToWorld(e.getX(), e.getY(), cameraX, cameraY, zoomFactor);
 
             if (e.getButton() == MouseButton.PRIMARY) {
-                // 1. 차량 체크 (디버그/시뮬레이션 모드 모두 가능)
-                Vehicle vHit = findVehicleHit(worldPt);
+                // Vehicle selection is available in both editor and simulation modes.
+                Vehicle vHit = vehicleController.findVehicleHit(worldPt);
                 if (vHit != null) {
                     selectionManager.selectVehicle(vHit);
                     isDraggingVehicle = true;
 
-                    // 더블 클릭 시 현재 위치에서 가장 가까운 차선을 찾아 경로 자동 생성 ❤️
+                    // Double-click recalculates the route from the nearest lane.
                     if (e.getClickCount() == 2) {
                         RoadManager.HitResult hit = roadManager.findHit(worldPt);
                         if (hit.lane != null) {
-                            // 차선 중앙으로 위치 스냅
-                            vHit.snapToNearestPoint(worldPt, junctionController); 
+                            boolean routeUpdated = vehicleController.updateRouteFromLane(vHit, worldPt, hit.lane);
                             
-                            // 목적지까지의 경로 계산
-                            List<Set<Lane>> route = Navigate.calculateRoute(hit.lane, roadManager, junctionController);
-                            if (route != null) {
-                                vHit.setLogicalRoute(route); // 논리적 경로 정보 추가 저장 ❤️
-                                vHit.setCurrentPhaseIndex(0);
-                                vHit.updateVisionArea(roadManager, junctionController, vehicles); // 감지 영역 먼저 업데이트 ❤️
-                                vHit.updateDynamicPath(junctionController,vehicles); // 업데이트된 감지 영역 기반 동적 경로 생성 ❤️
+                            if (routeUpdated) {
                                 statusLabel.setText("Vehicle path updated! Drag to move along the path.");
                             } else {
                                 statusLabel.setText("No path found from this lane.");
@@ -266,7 +259,7 @@ public class SimulatorController {
                         selectionManager.selectTrafficLight(tl);
                         modeManager.setMode(EditorMode.SELECT); 
                     }
-                } else if (modeManager.getMode() == EditorMode.ADD_CAMERA) { // 카메라 추가 ❤️
+                } else if (modeManager.getMode() == EditorMode.ADD_CAMERA) {
                     RoadManager.HitResult hit = roadManager.findHit(worldPt);
                     if (hit.lane != null) {
                         Camera cam = new Camera(hit.road, worldPt, hit.lane);
@@ -274,43 +267,32 @@ public class SimulatorController {
                         selectionManager.selectCamera(cam);
                         modeManager.setMode(EditorMode.SELECT);
                     }
-                } else if (modeManager.getMode() == EditorMode.ADD_VEHICLE && isDebugMode) { // 차량 추가 (디버그 전용) ❤️
+                } else if (modeManager.getMode() == EditorMode.ADD_VEHICLE && isDebugMode) {
                     RoadManager.HitResult hit = roadManager.findHit(worldPt);
                     if (hit.lane != null) {
-                        Vehicle car = new Vehicle(worldPt.x, worldPt.y, 0, VehicleType.NORMAL);
-                        car.snapToNearestPoint(worldPt, junctionController);
-                        
-                        // 기본 경로 설정 (현재 차선 기준)
-                        List<Set<Lane>> route = Navigate.calculateRoute(hit.lane, roadManager, junctionController);
-                        if (route != null) {
-                            car.setLogicalRoute(route);
-                            car.updateDynamicPath(junctionController,vehicles);
-                            car.updateVisionArea(roadManager, junctionController, vehicles);
-                        }
-                        
-                        vehicles.add(car);
+                        Vehicle car = vehicleController.createVehicleOnLane(worldPt, hit.lane, VehicleType.NORMAL);
                         selectionManager.selectVehicle(car);
                         modeManager.setMode(EditorMode.SELECT);
                     }
                 } else {
-                    // 1. 포인트 핸들
+                    // Point handles
                     RoadManager.PointHit pointHit = roadManager.findNearestPoint(worldPt, 10.0 / zoomFactor);
                     if (pointHit != null && pointHit.road == selectionManager.getSelectedRoad() && !pointHit.road.isLock() && !shiftDown) {
                         editTool.startEditing(pointHit.road, pointHit.type);
                     } else {
-                        // 2. 신호등 체크
+                        // Traffic light hit test
                         TrafficLight tlHit = roadManager.findTrafficLightHit(worldPt, 15.0 / zoomFactor);
                         if (tlHit != null) {
                             selectionManager.selectTrafficLight(tlHit);
                             isDraggingObject = true;
                         } else {
-                            // 3. 카메라 체크 ❤️
+                            // Camera hit test
                             Camera camHit = roadManager.findCameraHit(worldPt, 15.0 / zoomFactor);
                             if (camHit != null) {
                                 selectionManager.selectCamera(camHit);
                                 isDraggingObject = true;
                             } else {
-                                // 4. 도로/차선
+                                // Road and lane hit test
                                 RoadManager.HitResult hit = roadManager.findHit(worldPt);
                                 if (hit.road != null) {
                                     if (shiftDown) {
@@ -343,13 +325,7 @@ public class SimulatorController {
             if (e.isPrimaryButtonDown()) {
                 if (isDraggingVehicle && selectionManager.getSelectedVehicle() != null) {
                     Vehicle v = selectionManager.getSelectedVehicle();
-                    v.snapToNearestPoint(worldPt, junctionController);
-                    v.updateDynamicPath(junctionController,vehicles); // 실시간 동적 경로 갱신 ❤️
-                    
-                    // 모든 차량의 감지 영역 실시간 업데이트 (한 차량의 이동이 다른 차량의 감지 범위에 영향을 줄 수 있음) ❤️
-                    for (Vehicle allV : vehicles) {
-                        allV.updateVisionArea(roadManager, junctionController, vehicles);
-                    }
+                    vehicleController.dragVehicle(v, worldPt);
                     
                     requestRender();
                     return;
@@ -370,9 +346,9 @@ public class SimulatorController {
                     roadManager.refreshStaticObjectPositions();
                 } else if (isDraggingObject) {
                     if (selectionManager.getSelectedTrafficLight() != null) {
-                        // 신호등 드래그 이동 비활성화 ❤️
+                        // Traffic light dragging is disabled.
                     } else if (selectionManager.getSelectedCamera() != null) {
-                        // 자석처럼 도로 위 스냅! ❤️
+                        // Snap cameras onto roads while dragging.
                         Point2D.Double snapped = roadManager.findNearestPointOnAnyRoad(worldPt);
                         selectionManager.getSelectedCamera().setLoc(snapped);
                     }
@@ -394,7 +370,7 @@ public class SimulatorController {
                 moveTool.stopMoving();
                 isDraggingObject = false;
 
-                // 도로 생성/수정 후 전체 연결 데이터 갱신 ❤️
+                // Refresh all connection data after road edits.
                 roadManager.refreshStaticObjectPositions();
                 refreshAllConnections();
             }
@@ -402,21 +378,9 @@ public class SimulatorController {
         });
     }
 
-    private Vehicle findVehicleHit(Point2D.Double worldPt) {
-        for (Vehicle v : vehicles) {
-            double dx = v.getX() - worldPt.x;
-            double dy = v.getY() - worldPt.y;
-            // 차량 크기 기반 히트 박스 (줌 보정 제거) ❤️
-            if (Math.sqrt(dx*dx + dy*dy) < 20.0) {
-                return v;
-            }
-        }
-        return null;
-    }
-
     public RoadManager getRoadManager() { return roadManager; }
     public JunctionController getJunctionController() { return junctionController; }
-    public List<Vehicle> getVehicles() { return vehicles; }
+    public List<Vehicle> getVehicles() { return vehicleController.getVehicles(); }
     public double getCameraX() { return cameraX; }
     public double getCameraY() { return cameraY; }
     public double getZoomFactor() { return zoomFactor; }
@@ -428,7 +392,7 @@ public class SimulatorController {
             roadManager.getRoadList(),
             roadManager.getTrafficLightList(),
             roadManager.getCameraList(),
-            vehicles, // 차량 리스트 전달
+            vehicleController.getVehicles(),
             drawingTool.getDragStart(),
             drawingTool.getCurrentMouse(),
             drawingTool.isDrawing(),

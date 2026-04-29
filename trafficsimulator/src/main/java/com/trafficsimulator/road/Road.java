@@ -70,9 +70,11 @@ public class Road {
      * 차선을 삭제합니다
      * @param laneNum
      */
-    public void deleteLane(int laneNum){
-        if(isLock) return;
-        laneList.remove(laneNum);
+    public Lane deleteLane(int laneNum){
+        if(isLock) return null;
+        Lane removedLane = laneList.remove(laneNum);
+        refresh();
+        return removedLane;
     }
 
     /**

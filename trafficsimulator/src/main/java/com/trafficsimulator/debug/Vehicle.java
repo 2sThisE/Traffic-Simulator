@@ -8,6 +8,7 @@ import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.ui.RoadManager;
 import com.trafficsimulator.util.UnitConverter;
+import com.trafficsimulator.vehicle.DriverPersonality;
 import com.trafficsimulator.vehicle.VehicleType;
 
 import javafx.scene.paint.Color;
@@ -23,15 +24,21 @@ public class Vehicle {
     private double speedKmh;      // 현재 속도 (km/h)
     private Color color;          // 차량 색상
     private VehicleType type;     // 차량 종류
+    private DriverPersonality driverPersonality;
     private boolean selected = false; // 선택 여부
 
     private final Autopilot autopilot; // 차량의 주행 지능 ❤️
 
     public Vehicle(double x, double y, double angle, VehicleType type) {
+        this(x, y, angle, type, DriverPersonality.AVERAGE);
+    }
+
+    public Vehicle(double x, double y, double angle, VehicleType type, DriverPersonality driverPersonality) {
         this.x = x;
         this.y = y;
         this.angle = angle;
         this.type = type;
+        this.driverPersonality = driverPersonality;
         this.speedKmh = 0; // 초기 속도 0
         
         // 실제 미터 단위 규격 설정 및 픽셀 변환
@@ -116,6 +123,7 @@ public class Vehicle {
     public Color getColor() { return color; }
     public void setColor(Color color) { this.color = color; }
     public VehicleType getType() { return type; }
+    public DriverPersonality getDriverPersonality() { return driverPersonality; }
     public boolean isSelected() { return selected; }
     public void setSelected(boolean selected) { this.selected = selected; }
 

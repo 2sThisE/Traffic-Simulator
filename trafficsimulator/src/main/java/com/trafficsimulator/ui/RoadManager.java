@@ -4,6 +4,7 @@ import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.camera.Camera;
@@ -23,8 +24,32 @@ public class RoadManager {
         roadList.remove(road);
     }
 
+    public void removeRoad(Road road, JunctionController junctionController) {
+        List<Lane> lanesToRemove = new ArrayList<>(road.getLaneList());
+        for (Lane lane : lanesToRemove) {
+            removeLaneReferences(lane);
+        }
+        if (junctionController != null) {
+            junctionController.removeLaneConnections(lanesToRemove);
+        }
+        roadList.remove(road);
+    }
+
     public List<Road> getRoadList() {
         return roadList;
+    }
+
+    public Lane removeLane(Road road, int laneIndex, JunctionController junctionController) {
+        if (road == null || laneIndex < 0 || laneIndex >= road.getLaneList().size()) {
+            return null;
+        }
+
+        Lane lane = road.getLane(laneIndex);
+        removeLaneReferences(lane);
+        if (junctionController != null) {
+            junctionController.removeLaneConnections(lane);
+        }
+        return road.deleteLane(laneIndex);
     }
 
     public void addTrafficLight(TrafficLight tl) {
@@ -50,6 +75,30 @@ public class RoadManager {
 
     public List<Camera> getCameraList() {
         return cameraList;
+    }
+
+    private void removeLaneReferences(Lane lane) {
+        List<TrafficLight> lightsToRemove = new ArrayList<>();
+        for (TrafficLight tl : trafficLightList) {
+            tl.removeControlLane(lane);
+            if (tl.getControlLaneList().isEmpty()) {
+                lightsToRemove.add(tl);
+            } else {
+                tl.updatePositionToLanesCenter();
+            }
+        }
+        trafficLightList.removeAll(lightsToRemove);
+
+        List<Camera> camerasToRemove = new ArrayList<>();
+        for (Camera cam : cameraList) {
+            cam.removeTargetLane(lane);
+            if (cam.getTargetLaneMap().isEmpty()) {
+                camerasToRemove.add(cam);
+            } else {
+                cam.updateLocationToCenter();
+            }
+        }
+        cameraList.removeAll(camerasToRemove);
     }
 
     /**

@@ -2,6 +2,7 @@ package com.trafficsimulator.road;
 
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -159,5 +160,16 @@ public class JunctionController {
         for (Set<LaneConnection> conns : connection.values()) {
             conns.removeIf(conn -> conn.targetLane() == lane);
         }
+        connection.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+    }
+
+    public void removeLaneConnections(Collection<Lane> lanes) {
+        for (Lane lane : lanes) {
+            connection.remove(lane);
+        }
+        for (Set<LaneConnection> conns : connection.values()) {
+            conns.removeIf(conn -> lanes.contains(conn.targetLane()));
+        }
+        connection.entrySet().removeIf(entry -> entry.getValue().isEmpty());
     }
 }

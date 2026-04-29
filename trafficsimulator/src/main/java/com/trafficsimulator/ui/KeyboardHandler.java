@@ -1,7 +1,5 @@
 package com.trafficsimulator.ui;
 
-import java.util.List;
-
 import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.LaneConnection;
@@ -20,7 +18,7 @@ public class KeyboardHandler {
     private final JunctionController junctionController;
     private final Runnable onUpdate;
 
-    public KeyboardHandler(EditorModeManager modeManager, RoadDrawingTool drawingTool, 
+    public KeyboardHandler(EditorModeManager modeManager, RoadDrawingTool drawingTool,
                            RoadManager roadManager, SelectionManager selectionManager,
                            JunctionController junctionController, Runnable onUpdate) {
         this.modeManager = modeManager;
@@ -54,13 +52,12 @@ public class KeyboardHandler {
 
     private void handleDeleteKey() {
         TrafficLight selectedTL = selectionManager.getSelectedTrafficLight();
-        Camera selectedCam = selectionManager.getSelectedCamera(); // 카메라 추가 ❤️
-        Lane highlightedLane = selectionManager.getHighlightedLane(); 
+        Camera selectedCam = selectionManager.getSelectedCamera();
+        Lane highlightedLane = selectionManager.getHighlightedLane();
         LaneConnection selectedConn = selectionManager.getSelectedConnection();
         Lane selectedLane = selectionManager.getSelectedLane();
         Road selectedRoad = selectionManager.getSelectedRoad();
 
-        // 1. 신호등 관련 삭제
         if (selectedTL != null) {
             if (highlightedLane != null) {
                 selectedTL.removeControlLane(highlightedLane);
@@ -69,56 +66,21 @@ public class KeyboardHandler {
             } else {
                 roadManager.removeTrafficLight(selectedTL);
             }
-        }
-        // 2. 카메라 관련 삭제 ❤️
-        else if (selectedCam != null) {
+        } else if (selectedCam != null) {
             if (highlightedLane != null) {
-                // 특정 차선만 감시 대상에서 제외
                 selectedCam.removeTargetLane(highlightedLane);
-                selectedCam.updateLocationToCenter(); // 중앙 다시 맞추기!
+                selectedCam.updateLocationToCenter();
                 selectionManager.setHighlightedLane(null);
             } else {
-                // 카메라 본체 삭제
                 roadManager.removeCamera(selectedCam);
             }
-        }
-        // 3. 교차로 연결선 삭제
-        else if (selectedConn != null && selectedLane != null) {
+        } else if (selectedConn != null && selectedLane != null) {
             junctionController.deleteConnection(selectedLane, selectedConn);
-        } 
-        // 4. 차선 삭제
-        else if (selectedLane != null && selectedRoad != null) {
+        } else if (selectedLane != null && selectedRoad != null) {
             int laneIdx = selectedRoad.getLaneNum(selectedLane);
-            if (laneIdx != -1) {
-                junctionController.removeLaneConnections(selectedLane);
-                selectedRoad.deleteLane(laneIdx);
-                selectedRoad.refresh();
-            }
-        } 
-        // 5. 도로 삭제 (연쇄 삭제 로직 포함)
-        else if (selectedRoad != null) {
-            List<Lane> lanesToDelete = selectedRoad.getLaneList();
-            
-            // 신호등 정리
-            List<TrafficLight> lightsToRemove = new java.util.ArrayList<>();
-            for (TrafficLight tl : roadManager.getTrafficLightList()) {
-                for (Lane lane : lanesToDelete) tl.removeControlLane(lane);
-                if (tl.getControlLaneList().isEmpty()) lightsToRemove.add(tl);
-                else tl.updatePositionToLanesCenter();
-            }
-            for (TrafficLight tl : lightsToRemove) roadManager.removeTrafficLight(tl);
-
-            // 카메라 정리 ❤️
-            List<Camera> camerasToRemove = new java.util.ArrayList<>();
-            for (Camera cam : roadManager.getCameraList()) {
-                for (Lane lane : lanesToDelete) cam.removeTargetLane(lane);
-                if (cam.getTargetLaneMap().isEmpty()) camerasToRemove.add(cam);
-                else cam.updateLocationToCenter();
-            }
-            for (Camera cam : camerasToRemove) roadManager.removeCamera(cam);
-
-            for (Lane lane : selectedRoad.getLaneList()) junctionController.removeLaneConnections(lane);
-            roadManager.removeRoad(selectedRoad);
+            roadManager.removeLane(selectedRoad, laneIdx, junctionController);
+        } else if (selectedRoad != null) {
+            roadManager.removeRoad(selectedRoad, junctionController);
         }
 
         selectionManager.clearSelection();
