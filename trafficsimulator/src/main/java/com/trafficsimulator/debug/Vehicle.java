@@ -137,5 +137,6 @@ public class Vehicle {
     public List<Point2D.Double> getForwardVisionArea() { return autopilot.getForwardVisionArea(); }
     public List<Point2D.Double> getSideVisionArea() { return autopilot.getSideVisionArea(); }
     public List<Point2D.Double> getVehicleVisionArea() { return autopilot.getVehicleVisionArea(); }
+    public boolean isRouteFinished() { return autopilot.isRouteFinished(); }
     public Autopilot getAutopilot() { return autopilot; }
 }

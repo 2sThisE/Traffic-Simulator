@@ -2,6 +2,7 @@ package com.trafficsimulator.ui;
 
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -99,8 +100,14 @@ public class VehicleController {
             spawnVehicleFromRandomStartLane();
         }
 
-        for (Vehicle vehicle : vehicles) {
+        Iterator<Vehicle> iterator = vehicles.iterator();
+        while (iterator.hasNext()) {
+            Vehicle vehicle = iterator.next();
             vehicle.updatePosition(junctionController);
+            if (vehicle.isRouteFinished()) {
+                iterator.remove();
+                continue;
+            }
             vehicle.updateVisionArea(roadManager, junctionController, vehicles);
             vehicle.updateDynamicPath(junctionController, vehicles);
         }

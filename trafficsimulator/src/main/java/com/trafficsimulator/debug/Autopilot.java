@@ -30,6 +30,7 @@ public class Autopilot {
     private Lane laneChangeTargetLane = null;
     private double laneChangePathDistance = 0.0;
     private double connectionPathDistance = 0.0;
+    private boolean routeFinished = false;
     
     // 시각적 렌더링을 위한 포인트 리스트 ❤️
     private List<Point2D.Double> forwardVisionArea = new ArrayList<>(); 
@@ -49,6 +50,10 @@ public class Autopilot {
      * 현재 속도(km/h)에 따른 1틱당 이동 거리(Pixel)를 계산하여 차량 위치를 업데이트합니다.
      */
     public void updatePosition(JunctionController junctionController) {
+        if (routeFinished) {
+            return;
+        }
+
         double ms = UnitConverter.kmhToMs(vehicle.getSpeedKmh());
         double pixelPerTick = UnitConverter.toPixelPerTick(ms);
 
@@ -387,9 +392,8 @@ public class Autopilot {
             return false;
         }
 
-        double nextRad = Math.toRadians(nextPoint.angleDeg);
-        vehicle.setX(nextPoint.point.x - Math.cos(nextRad) * (vehicle.getWidth() / 2.0));
-        vehicle.setY(nextPoint.point.y - Math.sin(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setX(nextPoint.point.x);
+        vehicle.setY(nextPoint.point.y);
         vehicle.setAngle(nextPoint.angleDeg);
         return laneChangePathDistance >= pathLength - 0.1;
     }
@@ -407,15 +411,15 @@ public class Autopilot {
             return false;
         }
 
-        double nextRad = Math.toRadians(nextPoint.angleDeg);
-        vehicle.setX(nextPoint.point.x - Math.cos(nextRad) * (vehicle.getWidth() / 2.0));
-        vehicle.setY(nextPoint.point.y - Math.sin(nextRad) * (vehicle.getWidth() / 2.0));
+        vehicle.setX(nextPoint.point.x);
+        vehicle.setY(nextPoint.point.y);
         vehicle.setAngle(nextPoint.angleDeg);
         return connectionPathDistance >= pathLength - 0.1;
     }
 
     private void beginConnectionToNextPhase(Lane currentLane, JunctionController junctionController) {
         if (junctionController == null || logicalRoute == null || currentPhaseIndex >= logicalRoute.size() - 1) {
+            routeFinished = true;
             return;
         }
 
@@ -901,10 +905,7 @@ public class Autopilot {
         if (targetLane == null) targetLane = currentPhase.iterator().next();
 
         double rad = Math.toRadians(vehicle.getAngle());
-        Point2D.Double p0 = new Point2D.Double(
-            vehicle.getX() + Math.cos(rad) * (vehicle.getWidth() / 2.0),
-            vehicle.getY() + Math.sin(rad) * (vehicle.getWidth() / 2.0)
-        );
+        Point2D.Double p0 = new Point2D.Double(vehicle.getX(), vehicle.getY());
 
         Lane currentLane = findNearestLane(currentPhase, p0);
         if (currentLane == null) currentLane = targetLane;
@@ -1057,7 +1058,10 @@ public class Autopilot {
     public List<Point2D.Double> getPath() { return path; }
     public void setPath(List<Point2D.Double> path) { this.path = path; }
     public List<Set<Lane>> getLogicalRoute() { return logicalRoute; }
-    public void setLogicalRoute(List<Set<Lane>> route) { this.logicalRoute = route; }
+    public void setLogicalRoute(List<Set<Lane>> route) {
+        this.logicalRoute = route;
+        this.routeFinished = false;
+    }
     public int getCurrentPhaseIndex() { return currentPhaseIndex; }
     public void setCurrentPhaseIndex(int index) { this.currentPhaseIndex = index; }
     public List<Point2D.Double> getForwardVisionArea() { return forwardVisionArea; }
@@ -1067,4 +1071,5 @@ public class Autopilot {
     public Area getLastSideVisionArea() { return lastSideVisionArea; }
     public Area getLastVehicleVisionArea() { return lastVehicleVisionArea; }
     public LaneConnection getCurrentConnection() { return currentConnection; }
+    public boolean isRouteFinished() { return routeFinished; }
 }
