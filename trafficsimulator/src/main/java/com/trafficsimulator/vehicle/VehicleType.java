@@ -1,10 +1,10 @@
 package com.trafficsimulator.vehicle;
 
 public enum VehicleType {
-    NORMAL(0.22, 0.35, 0.90),
-    LIGHT_TRUCK(0.16, 0.25, 0.70),
-    HEAVY_TRUCK(0.12, 0.18, 0.55),
-    BUS(0.14, 0.20, 0.60);
+    NORMAL(0.75, 1.10, 2.50),
+    LIGHT_TRUCK(0.55, 0.90, 2.00),
+    HEAVY_TRUCK(0.35, 0.70, 1.50),
+    BUS(0.45, 0.80, 1.80);
 
     private final double accelerationKmhPerTick;
     private final double brakeKmhPerTick;

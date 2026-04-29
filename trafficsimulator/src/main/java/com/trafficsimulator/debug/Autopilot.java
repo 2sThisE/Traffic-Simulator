@@ -361,8 +361,9 @@ public class Autopilot {
             double brakingDistanceM = Math.max(0.5, UnitConverter.toMeter(availableForwardPx - desiredSafetyPx));
             double requiredBrakeMs2 = PhysicEngine.calculateRequiredBraking(currentSpeed, targetLeadSpeed, brakingDistanceM);
             double maxBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getHardBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
-            double normalBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
-            double brakeMs2 = Math.min(maxBrakeMs2, Math.max(normalBrakeMs2, requiredBrakeMs2));
+            
+            // 필요한 제동력만큼만 밟되, 차량의 최대 제동 성능(급브레이크)을 넘지 않도록 제한 ❤️
+            double brakeMs2 = Math.min(maxBrakeMs2, requiredBrakeMs2);
             nextSpeed = Math.min(currentSpeed, PhysicEngine.calculateSpeed(currentSpeed, -brakeMs2));
         } else if (currentSpeed < targetSpeed) {
             nextSpeed = Math.min(targetSpeed, currentSpeed + vehicle.getType().getAccelerationKmhPerTick());

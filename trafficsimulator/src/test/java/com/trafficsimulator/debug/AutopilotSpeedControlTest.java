@@ -28,7 +28,7 @@ class AutopilotSpeedControlTest {
                 new Point2D.Double(UnitConverter.toPixel(500.0), 0),
                 true
         );
-        road.setLimitSpeed(100);
+        road.setLimitSpeed(150);
         road.addLane(true, 0);
         roadManager.addRoad(road);
 
@@ -37,7 +37,7 @@ class AutopilotSpeedControlTest {
 
         Vehicle rearVehicle = new Vehicle(0, 0, 0, VehicleType.NORMAL, DriverPersonality.MODEL);
         rearVehicle.setLogicalRoute(route);
-        rearVehicle.setSpeedKmh(100.0);
+        rearVehicle.setSpeedKmh(150.0);
 
         Vehicle stoppedVehicle = new Vehicle(UnitConverter.toPixel(200.0), 0, 0, VehicleType.NORMAL, DriverPersonality.MODEL);
         stoppedVehicle.setLogicalRoute(route);
@@ -46,13 +46,28 @@ class AutopilotSpeedControlTest {
         List<Vehicle> vehicles = List.of(rearVehicle, stoppedVehicle);
 
         double minSpeed = rearVehicle.getSpeedKmh();
-        for (int i = 0; i < 20; i++) {
+        double stoppedVehicleRearX = stoppedVehicle.getX() - stoppedVehicle.getWidth() / 2.0;
+
+        System.out.println("Tick | Speed (km/h) | Brake (delta) | Distance (m)");
+        for (int i = 0; i < 500; i++) {
+            double prevSpeed = rearVehicle.getSpeedKmh();
             rearVehicle.updateVisionArea(roadManager, junctionController, vehicles);
             rearVehicle.updateSpeedControl(roadManager);
             rearVehicle.updatePosition(junctionController);
-            minSpeed = Math.min(minSpeed, rearVehicle.getSpeedKmh());
+            double currentSpeed = rearVehicle.getSpeedKmh();
+            minSpeed = Math.min(minSpeed, currentSpeed);
+            
+            double delta = prevSpeed - currentSpeed;
+            double rearVehicleFrontX = rearVehicle.getX() + rearVehicle.getWidth() / 2.0;
+            double distancePx = stoppedVehicleRearX - rearVehicleFrontX;
+            double distanceM = UnitConverter.toMeter(distancePx);
+
+            System.out.printf("%4d | %12.2f | %13.2f | %12.2f%n", i, currentSpeed, delta > 0 ? delta : 0, distanceM);
+
+            assertTrue(rearVehicleFrontX <= stoppedVehicleRearX + 0.1, 
+                "Collision or overtake detected at tick " + i + "! Front: " + rearVehicleFrontX + ", Target Rear: " + stoppedVehicleRearX);
         }
 
-        assertTrue(minSpeed < 100.0, "Rear vehicle should brake when the forward vehicle vision distance shrinks.");
+        assertTrue(minSpeed < 150.0, "Rear vehicle should have braked.");
     }
 }
