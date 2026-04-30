@@ -42,6 +42,12 @@ public class Vehicle {
 
     private final Autopilot autopilot; // 차량의 주행 지능 ❤️
 
+    private double boundingRadius; // 캐싱된 바운딩 반경 ❤️
+    private transient Shape cachedShape = null;
+    private double lastShapeX = Double.NaN;
+    private double lastShapeY = Double.NaN;
+    private double lastShapeAngle = Double.NaN;
+
     public Vehicle(double x, double y, double angle, VehicleType type) {
         this(x, y, angle, type, DriverPersonality.AVERAGE);
     }
@@ -86,6 +92,7 @@ public class Vehicle {
 
         this.width = UnitConverter.toPixel(lengthInMeters);
         this.height = UnitConverter.toPixel(widthInMeters);
+        this.boundingRadius = Math.sqrt(this.width * this.width / 4.0 + this.height * this.height / 4.0);
 
         this.autopilot = new Autopilot(this);
     }
@@ -119,11 +126,21 @@ public class Vehicle {
      * 충돌 감지를 위한 회전된 사각형 영역 반환 ❤️
      */
     public Shape getShape() {
-        AffineTransform at = new AffineTransform();
-        at.translate(x, y);
-        at.rotate(Math.toRadians(angle));
-        Rectangle2D rect = new Rectangle2D.Double(-width / 2.0, -height / 2.0, width, height);
-        return at.createTransformedShape(rect);
+        if (cachedShape == null || x != lastShapeX || y != lastShapeY || angle != lastShapeAngle) {
+            AffineTransform at = new AffineTransform();
+            at.translate(x, y);
+            at.rotate(Math.toRadians(angle));
+            Rectangle2D rect = new Rectangle2D.Double(-width / 2.0, -height / 2.0, width, height);
+            cachedShape = at.createTransformedShape(rect);
+            lastShapeX = x;
+            lastShapeY = y;
+            lastShapeAngle = angle;
+        }
+        return cachedShape;
+    }
+
+    public double getBoundingRadius() {
+        return boundingRadius;
     }
 
     /**

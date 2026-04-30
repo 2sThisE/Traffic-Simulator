@@ -166,7 +166,7 @@ public class Autopilot {
         );
 
         double actualRadiusPx = maxDistPx;
-        double stepPx = UnitConverter.toPixel(1.0); 
+        double stepPx = UnitConverter.toPixel(5.0); // 최적화: 1.0 -> 5.0 (5배 더 빠른 레이캐스트) ❤️
         boolean inside = false;
         
         for (double d = 0; d <= maxDistPx; d += stepPx) {

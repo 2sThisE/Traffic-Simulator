@@ -155,10 +155,8 @@ public class VehicleController {
                 double distSq = dx * dx + dy * dy;
                 
                 // 두 차량의 대각선 길이 합의 제곱을 임계값으로 사용 (안전마진 포함)
-                // width/2와 height/2로 구성된 직각삼각형의 빗변 길이의 합
-                double radius1 = Math.sqrt(v1.getWidth() * v1.getWidth() / 4.0 + v1.getHeight() * v1.getHeight() / 4.0);
-                double radius2 = Math.sqrt(v2.getWidth() * v2.getWidth() / 4.0 + v2.getHeight() * v2.getHeight() / 4.0);
-                double thresholdDistSq = Math.pow(radius1 + radius2, 2);
+                double radiusSum = v1.getBoundingRadius() + v2.getBoundingRadius();
+                double thresholdDistSq = radiusSum * radiusSum;
 
                 if (distSq <= thresholdDistSq) {
                     // 2. 정밀 영역 교차 검사 (Precise Intersection Test)
