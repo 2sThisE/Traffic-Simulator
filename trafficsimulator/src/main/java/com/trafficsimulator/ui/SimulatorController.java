@@ -13,6 +13,7 @@ import com.trafficsimulator.road.trafficlight.TrafficLightController;
 import com.trafficsimulator.util.GlobalTimer;
 import com.trafficsimulator.vehicle.VehicleType;
 
+import javafx.animation.AnimationTimer;
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Button;
@@ -52,6 +53,7 @@ public class SimulatorController {
     private KeyboardHandler keyboardHandler;
     private CanvasTransformHandler transformHandler;
     private VehicleController vehicleController;
+    private AnimationTimer renderTimer;
 
     private boolean isSimulationRunning = false; 
     private boolean isDraggingObject = false;
@@ -77,9 +79,15 @@ public class SimulatorController {
             javafx.application.Platform.runLater(() -> {
                 double seconds = com.trafficsimulator.util.GlobalTimer.ticksToSeconds(globalTimer.getTotalTicks());
                 tickLabel.setText(String.format("Time: %.1fs", seconds));
-                requestRender();
             });
         });
+
+        renderTimer = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                requestRender();
+            }
+        };
 
         renderer = new CanvasRenderer(mainCanvas);
         drawingTool = new RoadDrawingTool(roadManager, junctionController, this::requestRender);
@@ -139,6 +147,7 @@ public class SimulatorController {
             trafficLightController.addTrafficLight(tl);
         }
         globalTimer.start();
+        renderTimer.start();
         requestRender();
     }
 
@@ -152,6 +161,7 @@ public class SimulatorController {
         statusLabel.setStyle("-fx-text-fill: #888888;");
         
         globalTimer.stop();
+        renderTimer.stop();
         globalTimer.reset();
         for (TrafficLight tl : roadManager.getTrafficLightList()) {
             tl.resetCurrentTick();
@@ -399,7 +409,8 @@ public class SimulatorController {
             cameraX, cameraY, zoomFactor,
             selectionManager,
             hoveredPoint,
-            junctionController
+            junctionController,
+            isSimulationRunning ? globalTimer.getInterpolationAlpha() : 1.0
         );
     }
 }

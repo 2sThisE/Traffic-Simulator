@@ -19,6 +19,8 @@ import javafx.scene.paint.Color;
 public class Vehicle {
     private double x, y;          // 중심 좌표 (Pixel)
     private double angle;         // 회전 각도 (Degree)
+    private double previousX, previousY;
+    private double previousAngle;
     private double width;         // 차량 길이 (Pixel)
     private double height;        // 차량 너비 (Pixel)
     private double speedKmh;      // 현재 속도 (km/h)
@@ -37,6 +39,9 @@ public class Vehicle {
         this.x = x;
         this.y = y;
         this.angle = angle;
+        this.previousX = x;
+        this.previousY = y;
+        this.previousAngle = angle;
         this.type = type;
         this.driverPersonality = driverPersonality;
         this.speedKmh = 0; // 초기 속도 0
@@ -78,7 +83,14 @@ public class Vehicle {
      * 오토파일럿 로직을 통해 차량의 위치를 업데이트합니다. ❤️
      */
     public void updatePosition(JunctionController junctionController) {
+        savePreviousTransform();
         autopilot.updatePosition(junctionController);
+    }
+
+    public void savePreviousTransform() {
+        this.previousX = x;
+        this.previousY = y;
+        this.previousAngle = angle;
     }
 
     /**
@@ -120,6 +132,13 @@ public class Vehicle {
     public void setY(double y) { this.y = y; }
     public double getAngle() { return angle; }
     public void setAngle(double angle) { this.angle = angle; }
+    public double getInterpolatedX(double alpha) { return lerp(previousX, x, clamp01(alpha)); }
+    public double getInterpolatedY(double alpha) { return lerp(previousY, y, clamp01(alpha)); }
+    public double getInterpolatedAngle(double alpha) {
+        double clampedAlpha = clamp01(alpha);
+        double delta = ((angle - previousAngle + 540.0) % 360.0) - 180.0;
+        return previousAngle + delta * clampedAlpha;
+    }
     public double getWidth() { return width; }
     public double getHeight() { return height; }
     public double getSpeedKmh() { return speedKmh; }
@@ -143,4 +162,12 @@ public class Vehicle {
     public List<Point2D.Double> getVehicleVisionArea() { return autopilot.getVehicleVisionArea(); }
     public boolean isRouteFinished() { return autopilot.isRouteFinished(); }
     public Autopilot getAutopilot() { return autopilot; }
+
+    private double lerp(double start, double end, double alpha) {
+        return start + (end - start) * alpha;
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
 }

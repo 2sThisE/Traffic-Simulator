@@ -13,6 +13,7 @@ public class GlobalTimer {
     private final List<Tickable> listeners = new ArrayList<>();
     private final Timeline timeline;
     private int totalTicks = 0;
+    private long lastTickNanos = System.nanoTime();
     public static final double TICKLATE = 0.1;
 
     /**
@@ -39,6 +40,7 @@ public class GlobalTimer {
     }
 
     public void start() {
+        lastTickNanos = System.nanoTime();
         timeline.play();
     }
 
@@ -51,6 +53,7 @@ public class GlobalTimer {
      */
     public void reset() {
         totalTicks = 0;
+        lastTickNanos = System.nanoTime();
     }
 
     /**
@@ -61,6 +64,7 @@ public class GlobalTimer {
     }
 
     private void tick() {
+        lastTickNanos = System.nanoTime();
         totalTicks++;
         for (Tickable listener : listeners) {
             listener.onTick();
@@ -69,5 +73,10 @@ public class GlobalTimer {
 
     public int getTotalTicks() {
         return totalTicks;
+    }
+
+    public double getInterpolationAlpha() {
+        double elapsedSeconds = (System.nanoTime() - lastTickNanos) / 1_000_000_000.0;
+        return Math.max(0.0, Math.min(1.0, elapsedSeconds / TICKLATE));
     }
 }

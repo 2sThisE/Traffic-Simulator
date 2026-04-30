@@ -32,7 +32,8 @@ public class CanvasRenderer {
                        List<Vehicle> vehicles,
                        Point2D.Double dragStart, Point2D.Double currentMouse, boolean isDrawing,
                        double cameraX, double cameraY, double zoom, SelectionManager selectionManager,
-                       RoadManager.PointHit hoveredPoint, JunctionController junctionController) {
+                       RoadManager.PointHit hoveredPoint, JunctionController junctionController,
+                       double interpolationAlpha) {
         GraphicsContext gc = canvas.getGraphicsContext2D();
         
         gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -52,7 +53,7 @@ public class CanvasRenderer {
         // 3. 차량 그리기
         if (vehicles != null) {
             for (Vehicle v : vehicles) {
-                drawVehicle(gc, v, selectionManager);
+                drawVehicle(gc, v, selectionManager, interpolationAlpha);
                 if (selectionManager.getSelectedVehicle() == v) {
                     drawVehiclePath(gc, v, zoom);
                     drawVehicleVision(gc, v, zoom); // 감지 영역 그리기 추가 ❤️
@@ -79,10 +80,10 @@ public class CanvasRenderer {
         gc.restore();
     }
 
-    private void drawVehicle(GraphicsContext gc, Vehicle v, SelectionManager sm) {
+    private void drawVehicle(GraphicsContext gc, Vehicle v, SelectionManager sm, double interpolationAlpha) {
         gc.save();
-        gc.translate(v.getX(), v.getY());
-        gc.rotate(v.getAngle());
+        gc.translate(v.getInterpolatedX(interpolationAlpha), v.getInterpolatedY(interpolationAlpha));
+        gc.rotate(v.getInterpolatedAngle(interpolationAlpha));
 
         double w = v.getWidth();
         double h = v.getHeight();
