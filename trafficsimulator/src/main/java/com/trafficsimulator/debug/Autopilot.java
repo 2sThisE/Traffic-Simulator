@@ -32,6 +32,11 @@ public class Autopilot {
     private double laneChangePathDistance = 0.0;
     private double connectionPathDistance = 0.0;
     private boolean routeFinished = false;
+    private Vehicle overtakeTargetVehicle = null;
+    private Lane overtakeReferenceLane = null;
+    private Lane overtakeLane = null;
+    private static final double OVERTAKE_CLEARANCE_M = 8.0;
+    private static final double OVERTAKE_SPEED_BOOST_KMH = 10.0;
     
     // 시각적 렌더링을 위한 포인트 리스트 ❤️
     private List<Point2D.Double> forwardVisionArea = new ArrayList<>(); 
@@ -343,6 +348,9 @@ public class Autopilot {
         if (!vehicle.getDriverPersonality().isStrictLawAdherence()) {
             targetSpeed += vehicle.getDriverPersonality().getMaxSpeedOffset();
         }
+        if (isOvertaking()) {
+            targetSpeed = Math.max(targetSpeed, currentRoad.getLimitSpeed() + OVERTAKE_SPEED_BOOST_KMH);
+        }
 
         double currentSpeed = vehicle.getSpeedKmh();
         double desiredSafetyPx = desiredSafetyDistancePx;
@@ -554,6 +562,10 @@ public class Autopilot {
         return laneChangeTargetLane != null && path != null && path.size() >= 2;
     }
 
+    private boolean isOvertaking() {
+        return overtakeTargetVehicle != null && overtakeReferenceLane != null && overtakeLane != null;
+    }
+
     private void beginLaneChangePath(List<Point2D.Double> newPath, Lane targetLane) {
         this.path = newPath;
         this.laneChangeTargetLane = targetLane;
@@ -566,6 +578,18 @@ public class Autopilot {
         this.laneChangeTargetLane = null;
         this.laneChangePathDistance = 0.0;
         updatePathArea();
+    }
+
+    private void beginOvertake(Vehicle targetVehicle, Lane referenceLane, Lane targetLane) {
+        this.overtakeTargetVehicle = targetVehicle;
+        this.overtakeReferenceLane = referenceLane;
+        this.overtakeLane = targetLane;
+    }
+
+    private void clearOvertake() {
+        this.overtakeTargetVehicle = null;
+        this.overtakeReferenceLane = null;
+        this.overtakeLane = null;
     }
 
     private List<Point2D.Double> getOrderedLanePath(Lane lane) {
@@ -971,7 +995,7 @@ public class Autopilot {
         }
     }
 
-    public void updateDynamicPath(JunctionController junctionController) {
+    public void updateDynamicPath(JunctionController junctionController, List<Vehicle> allVehicles) {
         if (isLaneChanging()) {
             updatePathArea();
             return;
@@ -1025,6 +1049,17 @@ public class Autopilot {
 
         double rad = Math.toRadians(vehicle.getAngle());
         Lane currentLane = (nearestLane != null) ? nearestLane : routeTargetLane;
+
+        if (isOvertaking()) {
+            if (allVehicles != null && !allVehicles.contains(overtakeTargetVehicle)) {
+                clearOvertake();
+            } else if (!hasPassedOvertakeTarget()) {
+                clearLaneChangePath();
+                return;
+            } else {
+                clearOvertake();
+            }
+        }
         
         Lane stepTargetLane = currentLane;
         double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
@@ -1039,6 +1074,7 @@ public class Autopilot {
         
         boolean isBlockedByFront = Double.isFinite(currentVehicleVisionDistancePx) && 
                                    (timeToReachFrontSec <= decisionTimeSec || currentVehicleVisionDistancePx <= (desiredSafetyDistancePx * 2.0));
+        Vehicle frontVehicle = (allVehicles == null) ? null : findFrontVehicleOnLane(currentLane, p0, allVehicles);
 
         List<Lane> adjacentLanes = getAdjacentLanes(currentPhase, currentLane, p0);
         Lane primaryAdjacent = null;
@@ -1052,7 +1088,7 @@ public class Autopilot {
                     break;
                 }
             }
-        } else if (isBlockedByFront && !adjacentLanes.isEmpty()) {
+        } else if (isBlockedByFront && frontVehicle != null && !adjacentLanes.isEmpty()) {
             primaryAdjacent = adjacentLanes.get(0);
             if (adjacentLanes.size() > 1) secondaryAdjacent = adjacentLanes.get(1);
         }
@@ -1066,7 +1102,7 @@ public class Autopilot {
             }
         }
         
-        if (!foundGap && isBlockedByFront && secondaryAdjacent != null && secondaryAdjacent != currentLane) {
+        if (!foundGap && isBlockedByFront && frontVehicle != null && secondaryAdjacent != null && secondaryAdjacent != currentLane) {
             if (checkLaneGapSafe(secondaryAdjacent, p0, lookaheadDist, junctionController)) {
                 stepTargetLane = secondaryAdjacent;
             }
@@ -1136,6 +1172,9 @@ public class Autopilot {
         List<Point2D.Double> newPath = new ArrayList<>();
         for (int i = 0; i <= 30; i++) newPath.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
         beginLaneChangePath(newPath, stepTargetLane);
+        if (!needRouteChange && isBlockedByFront && frontVehicle != null) {
+            beginOvertake(frontVehicle, currentLane, stepTargetLane);
+        }
         
         updatePathArea(); // 궤적 영역 업데이트 ❤️
     }
@@ -1152,6 +1191,51 @@ public class Autopilot {
             return collisionCheck.isEmpty();
         }
         return false;
+    }
+
+    private Vehicle findFrontVehicleOnLane(Lane lane, Point2D.Double p0, List<Vehicle> allVehicles) {
+        if (lane == null || allVehicles == null) return null;
+
+        double myProjDist = getProjectionDistance(lane, p0);
+        if (myProjDist < 0) return null;
+
+        double laneWidthPx = UnitConverter.toPixel(3.5);
+        double maxLaneCenterDistSq = laneWidthPx * laneWidthPx / 4.0;
+        double maxFrontDistancePx = Math.max(UnitConverter.toPixel(10.0), currentVehicleVisionDistancePx + UnitConverter.toPixel(20.0));
+        Vehicle nearestFrontVehicle = null;
+        double nearestFrontDistance = Double.POSITIVE_INFINITY;
+
+        for (Vehicle other : allVehicles) {
+            if (other == vehicle) continue;
+
+            Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+            double[] projAndDistSq = getProjectionAndDistanceSq(lane, otherPos);
+            if (projAndDistSq[1] > maxLaneCenterDistSq) continue;
+
+            double frontDistance = projAndDistSq[0] - myProjDist - (vehicle.getWidth() + other.getWidth()) / 2.0;
+            if (frontDistance >= 0.0 && frontDistance < nearestFrontDistance && frontDistance <= maxFrontDistancePx) {
+                nearestFrontDistance = frontDistance;
+                nearestFrontVehicle = other;
+            }
+        }
+
+        return nearestFrontVehicle;
+    }
+
+    private boolean hasPassedOvertakeTarget() {
+        if (!isOvertaking()) return true;
+
+        Point2D.Double myPos = new Point2D.Double(vehicle.getX(), vehicle.getY());
+        Point2D.Double targetPos = new Point2D.Double(overtakeTargetVehicle.getX(), overtakeTargetVehicle.getY());
+        double myProjDist = getProjectionDistance(overtakeReferenceLane, myPos);
+        double targetProjDist = getProjectionDistance(overtakeReferenceLane, targetPos);
+        if (myProjDist < 0 || targetProjDist < 0) {
+            return true;
+        }
+
+        double clearancePx = UnitConverter.toPixel(OVERTAKE_CLEARANCE_M);
+        double requiredGap = (vehicle.getWidth() + overtakeTargetVehicle.getWidth()) / 2.0 + clearancePx;
+        return myProjDist - targetProjDist > requiredGap;
     }
 
     private List<Lane> getAdjacentLanes(Set<Lane> currentPhase, Lane currentLane, Point2D.Double p0) {
@@ -1221,6 +1305,7 @@ public class Autopilot {
     public void setLogicalRoute(List<Set<Lane>> route) {
         this.logicalRoute = route;
         this.routeFinished = false;
+        clearOvertake();
     }
     public int getCurrentPhaseIndex() { return currentPhaseIndex; }
     public void setCurrentPhaseIndex(int index) { this.currentPhaseIndex = index; }
