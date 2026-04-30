@@ -126,6 +126,30 @@ public class RoadManager {
     }
 
     /**
+     * 두 도로가 서로 교차점(Junction)을 통해 위상적으로 연결되어 있는지 확인합니다. ❤️
+     * 시작점이나 끝점의 위치가 아주 가까운 경우 같은 교차로를 공유하는 것으로 간주합니다.
+     */
+    public static boolean areRoadsConnected(Road r1, Road r2) {
+        if (r1 == null || r2 == null) return false;
+        if (r1 == r2) return true; // 같은 도로면 당연히 연결됨
+
+        // 교차로 스냅(Snap) 한계치(약 20픽셀)를 위상 연결 판단 기준으로 사용 ❤️
+        double thresholdSq = 400.0; // 20 * 20
+
+        Point2D.Double s1 = r1.getStartPoint();
+        Point2D.Double e1 = r1.getEndPoint();
+        Point2D.Double s2 = r2.getStartPoint();
+        Point2D.Double e2 = r2.getEndPoint();
+
+        if (s1 != null && s2 != null && s1.distanceSq(s2) < thresholdSq) return true;
+        if (s1 != null && e2 != null && s1.distanceSq(e2) < thresholdSq) return true;
+        if (e1 != null && s2 != null && e1.distanceSq(s2) < thresholdSq) return true;
+        if (e1 != null && e2 != null && e1.distanceSq(e2) < thresholdSq) return true;
+
+        return false;
+    }
+
+    /**
      * 특정 좌표 근처에 카메라가 있는지 확인합니다. ❤️
      */
     public Camera findCameraHit(Point2D.Double worldPt, double threshold) {

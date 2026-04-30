@@ -1,6 +1,9 @@
 package com.trafficsimulator.debug;
 
+import java.awt.Shape;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
@@ -8,6 +11,7 @@ import java.util.Set;
 
 import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
+import com.trafficsimulator.road.Road;
 import com.trafficsimulator.ui.RoadManager;
 import com.trafficsimulator.util.UnitConverter;
 import com.trafficsimulator.vehicle.DriverPersonality;
@@ -32,6 +36,9 @@ public class Vehicle {
     private DriverPersonality driverPersonality;
     private boolean selected = false; // 선택 여부
     private final EnumSet<VehicleLight> lights = EnumSet.noneOf(VehicleLight.class);
+
+    private boolean crashed = false; // 충돌 여부 ❤️
+    private int crashTickCounter = 0; // 충돌 후 경과 틱 ❤️
 
     private final Autopilot autopilot; // 차량의 주행 지능 ❤️
 
@@ -84,9 +91,59 @@ public class Vehicle {
     }
 
     /**
+     * 차량 충돌 처리 ❤️
+     */
+    public void setCrashed() {
+        if (!this.crashed) {
+            this.crashed = true;
+            this.speedKmh = 0;
+            this.color = Color.RED;
+            setLight(VehicleLight.EMERGENCY, true);
+            savePreviousTransform(); // 충돌 시 제자리에 고정 (움찔거림 방지) ❤️
+        }
+    }
+
+    public boolean isCrashed() {
+        return crashed;
+    }
+
+    public int getCrashTickCounter() {
+        return crashTickCounter;
+    }
+
+    public void incrementCrashTick() {
+        this.crashTickCounter++;
+    }
+
+    /**
+     * 충돌 감지를 위한 회전된 사각형 영역 반환 ❤️
+     */
+    public Shape getShape() {
+        AffineTransform at = new AffineTransform();
+        at.translate(x, y);
+        at.rotate(Math.toRadians(angle));
+        Rectangle2D rect = new Rectangle2D.Double(-width / 2.0, -height / 2.0, width, height);
+        return at.createTransformedShape(rect);
+    }
+
+    /**
+     * 현재 차량이 위치한(또는 목표로 하는 가장 가까운 페이즈의) 도로를 반환합니다.
+     */
+    public Road getCurrentRoad(RoadManager roadManager) {
+        List<Set<Lane>> route = autopilot.getLogicalRoute();
+        if (route == null) return null;
+        int idx = autopilot.getCurrentPhaseIndex();
+        if (idx < 0 || idx >= route.size()) return null;
+        Set<Lane> currentPhase = route.get(idx);
+        if (currentPhase == null || currentPhase.isEmpty()) return null;
+        return roadManager.findRoadByLane(currentPhase.iterator().next());
+    }
+
+    /**
      * 오토파일럿 로직을 통해 차량의 위치를 업데이트합니다. ❤️
      */
     public void updatePosition(JunctionController junctionController) {
+        if (crashed) return; // 충돌 시 이동 불가 ❤️
         savePreviousTransform();
         autopilot.updatePosition(junctionController);
     }
@@ -101,10 +158,12 @@ public class Vehicle {
      * 오토파일럿 로직을 통해 감지 영역을 업데이트합니다. ❤️
      */
     public void updateVisionArea(RoadManager roadManager, JunctionController junctionController, List<Vehicle> vehicles) {
+        if (crashed) return; // 충돌 시 센서 끄기 ❤️
         autopilot.updateVisionArea(roadManager, junctionController, vehicles);
     }
 
     public void updateSpeedControl(RoadManager roadManager) {
+        if (crashed) return; // 충돌 시 속도 제어 불가 ❤️
         autopilot.updateSpeedControl(roadManager);
     }
 
@@ -112,6 +171,7 @@ public class Vehicle {
      * 특정 좌표와 가장 가까운 경로상의 위치로 차량을 이동시킵니다.
      */
     public void snapToNearestPoint(Point2D.Double target) {
+        if (crashed) return;
         autopilot.snapToNearestPoint(target, null);
     }
 
@@ -119,6 +179,7 @@ public class Vehicle {
      * 특정 좌표와 가장 가까운 경로상의 위치로 차량을 이동시킵니다.
      */
     public void snapToNearestPoint(Point2D.Double target, JunctionController junctionController) {
+        if (crashed) return;
         autopilot.snapToNearestPoint(target, junctionController);
     }
 
@@ -126,6 +187,7 @@ public class Vehicle {
      * 동적인 주행 경로를 업데이트합니다. ❤️
      */
     public void updateDynamicPath(JunctionController junctionController, List<Vehicle> vehicles) {
+        if (crashed) return;
         autopilot.updateDynamicPath(junctionController, vehicles);
     }
 

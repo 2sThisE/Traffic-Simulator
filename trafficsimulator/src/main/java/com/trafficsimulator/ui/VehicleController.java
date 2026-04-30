@@ -1,5 +1,6 @@
 package com.trafficsimulator.ui;
 
+import java.awt.geom.Area;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -17,7 +18,7 @@ import com.trafficsimulator.vehicle.VehicleType;
 
 public class VehicleController {
     public static final int MAX_VEHICLE_COUNT = 100;
-    public static final int VEHICLE_SPAWN_INTERVAL_TICKS = 10;
+    public static final double VEHICLE_SPAWN_INTERVAL_TICKS = 5;
 
     private static final double NORMAL_VEHICLE_RATIO = 0.75;
     private static final double LIGHT_TRUCK_RATIO = 0.12;
@@ -100,9 +101,21 @@ public class VehicleController {
             spawnVehicleFromRandomStartLane();
         }
 
+        checkCollisions(); // 충돌 검사 로직 추가 ❤️
+
         Iterator<Vehicle> iterator = vehicles.iterator();
         while (iterator.hasNext()) {
             Vehicle vehicle = iterator.next();
+            
+            // 충돌한 차량 처리 로직 ❤️
+            if (vehicle.isCrashed()) {
+                vehicle.incrementCrashTick();
+                if (vehicle.getCrashTickCounter() >= 200) { // 200틱 후 소멸
+                    iterator.remove();
+                }
+                continue; // 사고난 차량은 나머지 로직(이동, 감지) 건너뜀
+            }
+
             vehicle.updateVisionArea(roadManager, junctionController, vehicles);
             vehicle.updateSpeedControl(roadManager);
             vehicle.updatePosition(junctionController);
@@ -111,6 +124,56 @@ public class VehicleController {
                 continue;
             }
             vehicle.updateDynamicPath(junctionController, vehicles);
+        }
+    }
+
+    /**
+     * 차량 간의 충돌을 검사하고 처리합니다. ❤️
+     * O(N^2) 검사를 최소화하기 위해 거리 기반 1차 필터링 후 영역 겹침 검사를 수행합니다.
+     */
+    private void checkCollisions() {
+        int n = vehicles.size();
+        for (int i = 0; i < n; i++) {
+            Vehicle v1 = vehicles.get(i);
+
+            for (int j = i + 1; j < n; j++) {
+                Vehicle v2 = vehicles.get(j);
+
+                // 둘 다 이미 사고난 차량이면 서로 검사할 필요 없음 (최적화) ❤️
+                if (v1.isCrashed() && v2.isCrashed()) continue;
+
+                // 교차점 없이 겹치는 도로(오버패스 등)에서의 충돌 방지 필터링 ❤️
+                Road r1 = v1.getCurrentRoad(roadManager);
+                Road r2 = v2.getCurrentRoad(roadManager);
+                if (r1 != null && r2 != null && !RoadManager.areRoadsConnected(r1, r2)) {
+                    continue; 
+                }
+
+                // 1. 빠른 거리 기반 필터링 (Fast Distance Filter)
+                double dx = v1.getX() - v2.getX();
+                double dy = v1.getY() - v2.getY();
+                double distSq = dx * dx + dy * dy;
+                
+                // 두 차량의 대각선 길이 합의 제곱을 임계값으로 사용 (안전마진 포함)
+                // width/2와 height/2로 구성된 직각삼각형의 빗변 길이의 합
+                double radius1 = Math.sqrt(v1.getWidth() * v1.getWidth() / 4.0 + v1.getHeight() * v1.getHeight() / 4.0);
+                double radius2 = Math.sqrt(v2.getWidth() * v2.getWidth() / 4.0 + v2.getHeight() * v2.getHeight() / 4.0);
+                double thresholdDistSq = Math.pow(radius1 + radius2, 2);
+
+                if (distSq <= thresholdDistSq) {
+                    // 2. 정밀 영역 교차 검사 (Precise Intersection Test)
+                    Area a1 = new Area(v1.getShape());
+                    Area a2 = new Area(v2.getShape());
+                    a1.intersect(a2);
+                    
+                    if (!a1.isEmpty()) { // 영역이 겹쳤다면 충돌!
+                        v1.setCrashed();
+                        v2.setCrashed();
+                        // v1이 새로 사고났고 j 루프 진행 중일 수 있으나, 
+                        // 어차피 겹친 차량은 다 사고처리 해야 하므로 break 하지 않음 ❤️
+                    }
+                }
+            }
         }
     }
 
