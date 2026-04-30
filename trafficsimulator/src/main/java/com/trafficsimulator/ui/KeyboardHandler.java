@@ -53,12 +53,21 @@ public class KeyboardHandler {
     private void handleDeleteKey() {
         TrafficLight selectedTL = selectionManager.getSelectedTrafficLight();
         Camera selectedCam = selectionManager.getSelectedCamera();
+        java.util.List<TrafficLight> selectedTLs = new java.util.ArrayList<>(selectionManager.getSelectedTrafficLights());
+        java.util.List<Camera> selectedCams = new java.util.ArrayList<>(selectionManager.getSelectedCameras());
         Lane highlightedLane = selectionManager.getHighlightedLane();
         LaneConnection selectedConn = selectionManager.getSelectedConnection();
         Lane selectedLane = selectionManager.getSelectedLane();
         Road selectedRoad = selectionManager.getSelectedRoad();
 
-        if (selectedTL != null) {
+        if (selectedTLs.size() + selectedCams.size() > 1) {
+            for (TrafficLight tl : selectedTLs) {
+                roadManager.removeTrafficLight(tl);
+            }
+            for (Camera cam : selectedCams) {
+                roadManager.removeCamera(cam);
+            }
+        } else if (selectedTL != null) {
             if (highlightedLane != null) {
                 selectedTL.removeControlLane(highlightedLane);
                 selectedTL.updatePositionToLanesCenter();

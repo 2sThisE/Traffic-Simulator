@@ -211,7 +211,7 @@ public class CanvasRenderer {
                 drawEnforcementLine(gc, lane, snapPt);
                 
                 // 카메라 본체와 단속 지점 연결 가이드선 (선택 시에만)
-                if (sm.getSelectedCamera() == cam) {
+                if (sm.isSelected(cam)) {
                     gc.save();
                     gc.setStroke(Color.rgb(255, 255, 255, 0.3));
                     gc.setLineWidth(1.0 / zoom);
@@ -223,7 +223,7 @@ public class CanvasRenderer {
 
             // 2. 카메라 본체 그리기 ❤️
             double size = 18.0;
-            if (sm.getSelectedCamera() == cam) {
+            if (sm.isSelected(cam)) {
                 gc.setStroke(Color.CYAN);
                 gc.setLineWidth(2.0 / zoom);
                 gc.strokeRect(pos.x - size/2 - 2/zoom, pos.y - size/2 - 2/zoom, size + 4/zoom, size + 4/zoom);
@@ -330,7 +330,7 @@ public class CanvasRenderer {
             double width = lampSize + padding * 2;
             double height = (lampSize + padding) * signalCount + padding;
 
-            if (sm.getSelectedTrafficLight() == tl) {
+            if (sm.isSelected(tl)) {
                 gc.setStroke(Color.CYAN);
                 gc.setLineWidth(2.0 / zoom);
                 gc.strokeRect(pos.x - width/2 - 2/zoom, pos.y - height/2 - 2/zoom, width + 4/zoom, height + 4/zoom);

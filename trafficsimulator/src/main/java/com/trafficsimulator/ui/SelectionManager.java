@@ -11,9 +11,9 @@ import java.util.List;
 
 public class SelectionManager {
     private final List<Lane> selectedLanes = new ArrayList<>();
+    private final List<TrafficLight> selectedTrafficLights = new ArrayList<>();
+    private final List<Camera> selectedCameras = new ArrayList<>();
     private Road selectedRoad;
-    private TrafficLight selectedTrafficLight;
-    private Camera selectedCamera;
     private Vehicle selectedVehicle; // 추가
     private Lane highlightedLane; 
     private LaneConnection selectedConnection;
@@ -30,14 +30,48 @@ public class SelectionManager {
     }
 
     public void selectTrafficLight(TrafficLight tl) {
-        clearSelection();
-        this.selectedTrafficLight = tl;
+        selectTrafficLight(tl, false);
+    }
+
+    public void selectTrafficLight(TrafficLight tl, boolean multiSelect) {
+        this.selectedRoad = null;
+        this.selectedConnection = null;
+        this.selectedVehicle = null;
+
+        if (!multiSelect) {
+            selectedLanes.clear();
+            selectedTrafficLights.clear();
+            selectedCameras.clear();
+        }
+
+        if (!selectedTrafficLights.contains(tl)) {
+            selectedTrafficLights.add(tl);
+        } else if (multiSelect) {
+            selectedTrafficLights.remove(tl);
+        }
         notifyChange();
     }
 
     public void selectCamera(Camera camera) {
-        clearSelection();
-        this.selectedCamera = camera;
+        selectCamera(camera, false);
+    }
+
+    public void selectCamera(Camera camera, boolean multiSelect) {
+        this.selectedRoad = null;
+        this.selectedConnection = null;
+        this.selectedVehicle = null;
+
+        if (!multiSelect) {
+            selectedLanes.clear();
+            selectedTrafficLights.clear();
+            selectedCameras.clear();
+        }
+
+        if (!selectedCameras.contains(camera)) {
+            selectedCameras.add(camera);
+        } else if (multiSelect) {
+            selectedCameras.remove(camera);
+        }
         notifyChange();
     }
 
@@ -50,12 +84,12 @@ public class SelectionManager {
     public void selectLane(Road road, Lane lane, boolean multiSelect) {
         this.selectedRoad = null;
         this.selectedConnection = null;
-        this.selectedTrafficLight = null;
-        this.selectedCamera = null;
         this.selectedVehicle = null;
         
         if (!multiSelect) {
             selectedLanes.clear();
+            selectedTrafficLights.clear();
+            selectedCameras.clear();
         }
         
         if (!selectedLanes.contains(lane)) {
@@ -81,9 +115,9 @@ public class SelectionManager {
     public void clearSelection() {
         this.selectedRoad = null;
         this.selectedLanes.clear();
+        this.selectedTrafficLights.clear();
+        this.selectedCameras.clear();
         this.selectedConnection = null;
-        this.selectedTrafficLight = null;
-        this.selectedCamera = null;
         this.selectedVehicle = null;
         this.highlightedLane = null;
         notifyChange();
@@ -97,9 +131,17 @@ public class SelectionManager {
 
     public Road getSelectedRoad() { return selectedRoad; }
     public List<Lane> getSelectedLanes() { return selectedLanes; }
+    public List<TrafficLight> getSelectedTrafficLights() { return selectedTrafficLights; }
+    public List<Camera> getSelectedCameras() { return selectedCameras; }
     public LaneConnection getSelectedConnection() { return selectedConnection; }
-    public TrafficLight getSelectedTrafficLight() { return selectedTrafficLight; }
-    public Camera getSelectedCamera() { return selectedCamera; }
+    public TrafficLight getSelectedTrafficLight() {
+        if (selectedTrafficLights.isEmpty()) return null;
+        return selectedTrafficLights.get(selectedTrafficLights.size() - 1);
+    }
+    public Camera getSelectedCamera() {
+        if (selectedCameras.isEmpty()) return null;
+        return selectedCameras.get(selectedCameras.size() - 1);
+    }
     public Vehicle getSelectedVehicle() { return selectedVehicle; }
     
     public Lane getSelectedLane() {
@@ -109,8 +151,8 @@ public class SelectionManager {
     
     public Object getSelectedObject() {
         if (selectedRoad != null) return selectedRoad;
-        if (selectedTrafficLight != null) return selectedTrafficLight;
-        if (selectedCamera != null) return selectedCamera;
+        if (!selectedTrafficLights.isEmpty()) return getSelectedTrafficLight();
+        if (!selectedCameras.isEmpty()) return getSelectedCamera();
         if (selectedVehicle != null) return selectedVehicle;
         if (!selectedLanes.isEmpty()) return selectedLanes;
         return null;
@@ -118,4 +160,6 @@ public class SelectionManager {
     
     public boolean isSelected(Road road) { return selectedRoad == road; }
     public boolean isSelected(Lane lane) { return selectedLanes.contains(lane); }
+    public boolean isSelected(TrafficLight trafficLight) { return selectedTrafficLights.contains(trafficLight); }
+    public boolean isSelected(Camera camera) { return selectedCameras.contains(camera); }
 }

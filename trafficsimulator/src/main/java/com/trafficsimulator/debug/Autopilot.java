@@ -5,6 +5,7 @@ import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -12,8 +13,11 @@ import java.util.Set;
 import com.trafficsimulator.road.JunctionController;
 import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.road.LaneConnection;
+import com.trafficsimulator.road.LaneType;
 import com.trafficsimulator.road.Road;
 import com.trafficsimulator.road.TrafficLaw;
+import com.trafficsimulator.road.trafficlight.TrafficLight;
+import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
 import com.trafficsimulator.ui.RoadManager;
 import com.trafficsimulator.util.PhysicEngine;
 import com.trafficsimulator.util.UnitConverter;
@@ -50,6 +54,8 @@ public class Autopilot {
     private double previousVehicleVisionDistancePx = Double.NaN;
     private double currentVehicleVisionDistancePx = Double.POSITIVE_INFINITY;
     private double desiredSafetyDistancePx = 0.0;
+    private final List<RememberedTrafficLight> rememberedTrafficLights = new ArrayList<>();
+    private static final double TRAFFIC_LIGHT_PASS_COMMIT_DISTANCE_M = 5.0;
 
     public Autopilot(Vehicle vehicle) {
         this.vehicle = vehicle;
@@ -179,6 +185,7 @@ public class Autopilot {
         
         this.lastForwardVisionArea = forwardVision; 
         fillVisionList(forwardVisionArea, forwardVision); 
+        updateRememberedTrafficLight(roadManager, junctionController, currentLane, frontPos);
 
         // 2. 측방 감지 영역 (타 차량용) ❤️
         Area sideVision = new Area();
@@ -355,6 +362,12 @@ public class Autopilot {
         double currentSpeed = vehicle.getSpeedKmh();
         double desiredSafetyPx = desiredSafetyDistancePx;
         double availableForwardPx = currentVehicleVisionDistancePx;
+        double trafficLightStopDistancePx = getActiveTrafficLightStopDistancePx();
+        boolean mustStopForTrafficLight = Double.isFinite(trafficLightStopDistancePx) && trafficLightStopDistancePx <= availableForwardPx;
+        if (mustStopForTrafficLight) {
+            availableForwardPx = trafficLightStopDistancePx;
+            desiredSafetyPx = UnitConverter.toPixel(1.0);
+        }
         double closingPxPerTick = 0.0;
         if (Double.isFinite(previousVehicleVisionDistancePx) && Double.isFinite(currentVehicleVisionDistancePx)) {
             closingPxPerTick = Math.max(0.0, previousVehicleVisionDistancePx - currentVehicleVisionDistancePx);
@@ -375,7 +388,19 @@ public class Autopilot {
         }
 
         // 정지 상황 특수 처리: 앞차가 정지해 있거나 아주 가까울 때 ❤️
-        if (isLeadStationary || (currentSpeed < 0.1 && Double.isFinite(availableForwardPx) && availableForwardPx < desiredSafetyPx)) {
+        if (mustStopForTrafficLight) {
+            if (availableForwardPx <= desiredSafetyPx) {
+                double maxBrakeKmhPerTick = vehicle.getType().getHardBrakeKmhPerTick();
+                nextSpeed = Math.max(0.0, currentSpeed - maxBrakeKmhPerTick);
+            } else {
+                double brakingDistanceM = Math.max(0.01, UnitConverter.toMeter(availableForwardPx - desiredSafetyPx));
+                double requiredBrakeMs2 = PhysicEngine.calculateRequiredBraking(currentSpeed, 0.0, brakingDistanceM);
+                double maxBrakeMs2 = UnitConverter.kmhToMs(vehicle.getType().getHardBrakeKmhPerTick()) / UnitConverter.TICK_INTERVAL_SECONDS;
+
+                double brakeMs2 = Math.min(maxBrakeMs2, requiredBrakeMs2);
+                nextSpeed = Math.min(currentSpeed, PhysicEngine.calculateSpeed(currentSpeed, -brakeMs2));
+            }
+        } else if (isLeadStationary || (currentSpeed < 0.1 && Double.isFinite(availableForwardPx) && availableForwardPx < desiredSafetyPx)) {
             double stationarySafetyPx = desiredSafetyPx; // 하드코딩(2.0m) 대신 운전자 성향 반영 ❤️
             
             if (availableForwardPx <= stationarySafetyPx) {
@@ -420,6 +445,198 @@ public class Autopilot {
 
         vehicle.setSpeedKmh(nextSpeed);
     }
+
+    private void updateRememberedTrafficLight(RoadManager roadManager, JunctionController junctionController, Lane currentLane, Point2D.Double frontPos) {
+        refreshRememberedTrafficLights(currentLane, frontPos);
+
+        if (roadManager != null && lastForwardVisionArea != null && !lastForwardVisionArea.isEmpty()) {
+            for (TrafficLight trafficLight : roadManager.getTrafficLightList()) {
+                Point2D.Double coordinates = trafficLight.getCoordinates();
+                if (coordinates == null || !isPointInForwardVision(coordinates)) continue;
+
+                TrafficLightCandidate candidate = findTrafficLightCandidate(trafficLight, currentLane, frontPos, junctionController);
+                if (candidate != null) {
+                    rememberVisibleTrafficLight(trafficLight, candidate);
+                }
+            }
+        }
+
+        sortRememberedTrafficLights();
+    }
+
+    private void refreshRememberedTrafficLights(Lane currentLane, Point2D.Double frontPos) {
+        rememberedTrafficLights.removeIf(remembered -> {
+            int phaseIndex = findLaneRoutePhaseIndex(remembered.lane);
+            if (phaseIndex < 0 || phaseIndex < currentPhaseIndex) {
+                return true;
+            }
+
+            remembered.routePhaseIndex = phaseIndex;
+            if (phaseIndex == currentPhaseIndex || remembered.lane == currentLane) {
+                remembered.stopDistancePx = getStopDistanceToLaneEnd(remembered.lane, frontPos);
+                return remembered.stopDistancePx < 0.0;
+            }
+
+            remembered.stopDistancePx = Double.POSITIVE_INFINITY;
+            return false;
+        });
+    }
+
+    private void rememberVisibleTrafficLight(TrafficLight trafficLight, TrafficLightCandidate candidate) {
+        RememberedTrafficLight remembered = findRememberedTrafficLight(trafficLight);
+        if (remembered == null) {
+            remembered = new RememberedTrafficLight(trafficLight);
+            rememberedTrafficLights.add(remembered);
+        }
+
+        remembered.signals = Arrays.copyOf(trafficLight.currentSignal(), trafficLight.currentSignal().length);
+        remembered.lane = candidate.lane;
+        remembered.pass = candidate.pass;
+        remembered.stopDistancePx = candidate.stopDistancePx;
+        remembered.routePhaseIndex = candidate.routePhaseIndex;
+    }
+
+    private RememberedTrafficLight findRememberedTrafficLight(TrafficLight trafficLight) {
+        for (RememberedTrafficLight remembered : rememberedTrafficLights) {
+            if (remembered.trafficLight == trafficLight) {
+                return remembered;
+            }
+        }
+        return null;
+    }
+
+    private void sortRememberedTrafficLights() {
+        rememberedTrafficLights.sort((a, b) -> {
+            int phaseCompare = Integer.compare(a.routePhaseIndex, b.routePhaseIndex);
+            if (phaseCompare != 0) return phaseCompare;
+            return Double.compare(a.stopDistancePx, b.stopDistancePx);
+        });
+    }
+
+    private boolean isPointInForwardVision(Point2D.Double point) {
+        if (lastForwardVisionArea.contains(point)) return true;
+
+        double tolerancePx = UnitConverter.toPixel(2.0);
+        return lastForwardVisionArea.intersects(
+                point.x - tolerancePx,
+                point.y - tolerancePx,
+                tolerancePx * 2.0,
+                tolerancePx * 2.0
+        );
+    }
+
+    private TrafficLightCandidate findTrafficLightCandidate(TrafficLight trafficLight, Lane currentLane, Point2D.Double frontPos, JunctionController junctionController) {
+        TrafficLightCandidate bestCandidate = null;
+
+        for (Lane lane : trafficLight.getControlLaneList()) {
+            int routePhaseIndex = findLaneRoutePhaseIndex(lane);
+            if (routePhaseIndex < 0) continue;
+
+            double stopDistancePx = getStopDistanceToLaneEnd(lane, frontPos);
+            if (routePhaseIndex == currentPhaseIndex || lane == currentLane) {
+                if (stopDistancePx < 0.0) continue;
+            } else {
+                stopDistancePx = Double.POSITIVE_INFINITY;
+            }
+
+            LaneType pass = getPlannedPassType(lane, junctionController);
+            TrafficLightCandidate candidate = new TrafficLightCandidate(lane, pass, Math.max(0.0, stopDistancePx), routePhaseIndex);
+            if (bestCandidate == null || compareTrafficLightCandidates(candidate, bestCandidate) < 0) {
+                bestCandidate = candidate;
+            }
+        }
+
+        return bestCandidate;
+    }
+
+    private int compareTrafficLightCandidates(TrafficLightCandidate a, TrafficLightCandidate b) {
+        int phaseCompare = Integer.compare(a.routePhaseIndex, b.routePhaseIndex);
+        if (phaseCompare != 0) return phaseCompare;
+        return Double.compare(a.stopDistancePx, b.stopDistancePx);
+    }
+
+    private int findLaneRoutePhaseIndex(Lane lane) {
+        if (lane == null || logicalRoute == null) return -1;
+        for (int p = currentPhaseIndex; p < logicalRoute.size(); p++) {
+            if (logicalRoute.get(p).contains(lane)) return p;
+        }
+        return -1;
+    }
+
+    private LaneType getPlannedPassType(Lane lane, JunctionController junctionController) {
+        if (junctionController == null || logicalRoute == null || currentPhaseIndex >= logicalRoute.size() - 1) {
+            return LaneType.STRAIGHT;
+        }
+
+        Set<Lane> nextPhase = logicalRoute.get(currentPhaseIndex + 1);
+        Set<LaneConnection> connections = junctionController.getConnectionList(lane);
+        if (connections != null) {
+            for (LaneConnection connection : connections) {
+                if (nextPhase.contains(connection.targetLane())) {
+                    return connection.laneType();
+                }
+            }
+        }
+
+        return LaneType.STRAIGHT;
+    }
+
+    private double getStopDistanceToLaneEnd(Lane lane, Point2D.Double frontPos) {
+        List<Point2D.Double> orderedPath = getOrderedLanePath(lane);
+        if (orderedPath.size() < 2) return Double.POSITIVE_INFINITY;
+        double currentDistance = getProjectionDistanceOnPath(orderedPath, frontPos);
+        double pathLength = getPathLength(orderedPath);
+        return pathLength - currentDistance;
+    }
+
+    private double getActiveTrafficLightStopDistancePx() {
+        if (rememberedTrafficLights.isEmpty()) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        RememberedTrafficLight activeTrafficLight = rememberedTrafficLights.get(0);
+        if (activeTrafficLight.signals == null || activeTrafficLight.lane == null || activeTrafficLight.routePhaseIndex > currentPhaseIndex) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        boolean canPass = TrafficLaw.checkTrafficLight(
+                activeTrafficLight.signals,
+                activeTrafficLight.trafficLight.getLightList(),
+                activeTrafficLight.pass
+        );
+        if (canPass) {
+            if (activeTrafficLight.routePhaseIndex == currentPhaseIndex
+                    && activeTrafficLight.stopDistancePx <= UnitConverter.toPixel(TRAFFIC_LIGHT_PASS_COMMIT_DISTANCE_M)) {
+                activeTrafficLight.committedToPass = true;
+            }
+            return Double.POSITIVE_INFINITY;
+        }
+        if (activeTrafficLight.committedToPass) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        return Math.max(0.0, activeTrafficLight.stopDistancePx);
+    }
+
+    private void clearRememberedTrafficLight() {
+        rememberedTrafficLights.clear();
+    }
+
+    private static class RememberedTrafficLight {
+        private final TrafficLight trafficLight;
+        private TrafficLightSignal[] signals;
+        private Lane lane;
+        private LaneType pass = LaneType.STRAIGHT;
+        private double stopDistancePx = Double.POSITIVE_INFINITY;
+        private int routePhaseIndex = Integer.MAX_VALUE;
+        private boolean committedToPass = false;
+
+        private RememberedTrafficLight(TrafficLight trafficLight) {
+            this.trafficLight = trafficLight;
+        }
+    }
+
+    private record TrafficLightCandidate(Lane lane, LaneType pass, double stopDistancePx, int routePhaseIndex) {}
 
     private double[] getProjectionAndDistanceSq(Lane lane, Point2D.Double pos) {
         List<Point2D.Double> fullPath = lane.getLanePath();
@@ -1306,6 +1523,7 @@ public class Autopilot {
         this.logicalRoute = route;
         this.routeFinished = false;
         clearOvertake();
+        clearRememberedTrafficLight();
     }
     public int getCurrentPhaseIndex() { return currentPhaseIndex; }
     public void setCurrentPhaseIndex(int index) { this.currentPhaseIndex = index; }

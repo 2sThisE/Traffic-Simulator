@@ -293,14 +293,14 @@ public class SimulatorController {
                         // Traffic light hit test
                         TrafficLight tlHit = roadManager.findTrafficLightHit(worldPt, 15.0 / zoomFactor);
                         if (tlHit != null) {
-                            selectionManager.selectTrafficLight(tlHit);
-                            isDraggingObject = true;
+                            selectionManager.selectTrafficLight(tlHit, shiftDown);
+                            isDraggingObject = !shiftDown;
                         } else {
                             // Camera hit test
                             Camera camHit = roadManager.findCameraHit(worldPt, 15.0 / zoomFactor);
                             if (camHit != null) {
-                                selectionManager.selectCamera(camHit);
-                                isDraggingObject = true;
+                                selectionManager.selectCamera(camHit, shiftDown);
+                                isDraggingObject = !shiftDown;
                             } else {
                                 // Road and lane hit test
                                 RoadManager.HitResult hit = roadManager.findHit(worldPt);
