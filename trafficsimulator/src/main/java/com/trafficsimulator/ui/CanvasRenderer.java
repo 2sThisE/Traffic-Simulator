@@ -15,6 +15,7 @@ import com.trafficsimulator.road.camera.Camera;
 import com.trafficsimulator.road.trafficlight.TrafficLight;
 import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
 import com.trafficsimulator.util.UnitConverter;
+import com.trafficsimulator.vehicle.VehicleLight;
 
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -99,17 +100,77 @@ public class CanvasRenderer {
         gc.setFill(v.getColor());
         gc.fillRoundRect(-w / 2, -h / 2, w, h, 8, 8);
 
+        // Headlights Glow
+        drawGlow(gc, w / 2 - 3, -h / 2 + 4, 15, Color.color(1, 1, 0.8, 0.4));
+        drawGlow(gc, w / 2 - 3, h / 2 - 4, 15, Color.color(1, 1, 0.8, 0.4));
+
         // Headlights
         gc.setFill(Color.YELLOW);
         gc.fillOval(w / 2 - 5, -h / 2 + 2, 4, 4);
         gc.fillOval(w / 2 - 5, h / 2 - 6, 4, 4);
 
-        // Taillights
-        gc.setFill(Color.RED);
-        gc.fillRect(-w / 2, -h / 2 + 3, 2, 3);
-        gc.fillRect(-w / 2, h / 2 - 6, 2, 3);
+        drawVehicleLights(gc, v, w, h);
 
         gc.restore();
+    }
+
+    private void drawVehicleLights(GraphicsContext gc, Vehicle v, double w, double h) {
+        boolean hardBrakeVisible = v.hasLight(VehicleLight.SLAMBRAKE) && isFastBlinkOn();
+        boolean brakeOn = v.hasLight(VehicleLight.BREAK) || v.getSpeedKmh() < 0.1 || hardBrakeVisible;
+        Color tailColor = brakeOn ? Color.RED : Color.rgb(100, 0, 0); // Slightly brighter when off
+        if (hardBrakeVisible) {
+            tailColor = Color.rgb(255, 50, 50);
+        }
+
+        // Tail lights glow
+        if (brakeOn) {
+            drawGlow(gc, -w / 2 + 1.5, -h / 2 + 5, 18, Color.color(1, 0, 0, 0.5));
+            drawGlow(gc, -w / 2 + 1.5, h / 2 - 5, 18, Color.color(1, 0, 0, 0.5));
+        }
+
+        gc.setFill(tailColor);
+        gc.fillRect(-w / 2, -h / 2 + 3, 3, 4);
+        gc.fillRect(-w / 2, h / 2 - 7, 3, 4);
+
+        boolean turnBlinkOn = isTurnBlinkOn();
+        boolean leftOn = turnBlinkOn && (v.hasLight(VehicleLight.LEFT) || v.hasLight(VehicleLight.EMERGENCY));
+        boolean rightOn = turnBlinkOn && (v.hasLight(VehicleLight.RIGHT) || v.hasLight(VehicleLight.EMERGENCY));
+
+        gc.setFill(Color.ORANGE);
+        if (leftOn) {
+            drawGlow(gc, -w / 2 + 1.5, -h / 2 + 1.5, 12, Color.color(1, 0.6, 0, 0.4));
+            drawGlow(gc, w / 2 - 3.5, -h / 2 + 1.5, 12, Color.color(1, 0.6, 0, 0.4));
+
+            gc.fillRect(-w / 2 + 1, -h / 2, 5, 3);
+            gc.fillRect(w / 2 - 6, -h / 2, 5, 3);
+        }
+        if (rightOn) {
+            drawGlow(gc, -w / 2 + 1.5, h / 2 - 1.5, 12, Color.color(1, 0.6, 0, 0.4));
+            drawGlow(gc, w / 2 - 3.5, h / 2 - 1.5, 12, Color.color(1, 0.6, 0, 0.4));
+
+            gc.fillRect(-w / 2 + 1, h / 2 - 3, 5, 3);
+            gc.fillRect(w / 2 - 6, h / 2 - 3, 5, 3);
+        }
+    }
+
+    private void drawGlow(GraphicsContext gc, double x, double y, double size, Color color) {
+        double r = color.getRed();
+        double g = color.getGreen();
+        double b = color.getBlue();
+        double a = color.getOpacity();
+
+        gc.setFill(Color.color(r, g, b, a * 0.4));
+        gc.fillOval(x - size / 2, y - size / 2, size, size);
+        gc.setFill(Color.color(r, g, b, a * 0.15));
+        gc.fillOval(x - size, y - size, size * 2, size * 2);
+    }
+
+    private boolean isTurnBlinkOn() {
+        return (System.nanoTime() / 350_000_000L) % 2 == 0;
+    }
+
+    private boolean isFastBlinkOn() {
+        return (System.nanoTime() / 120_000_000L) % 2 == 0;
     }
 
     /**

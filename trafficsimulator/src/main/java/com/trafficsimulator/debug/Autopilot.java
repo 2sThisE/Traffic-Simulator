@@ -21,6 +21,7 @@ import com.trafficsimulator.road.trafficlight.TrafficLightSignal;
 import com.trafficsimulator.ui.RoadManager;
 import com.trafficsimulator.util.PhysicEngine;
 import com.trafficsimulator.util.UnitConverter;
+import com.trafficsimulator.vehicle.VehicleLight;
 
 /**
  * 차량의 주행 지능 및 경로 관리를 담당하는 오토파일럿 클래스입니다. ❤️
@@ -41,6 +42,7 @@ public class Autopilot {
     private Lane overtakeLane = null;
     private static final double OVERTAKE_CLEARANCE_M = 8.0;
     private static final double OVERTAKE_SPEED_BOOST_KMH = 10.0;
+    private static final double BRAKE_LIGHT_EPSILON_KMH = 0.05;
     
     // 시각적 렌더링을 위한 포인트 리스트 ❤️
     private List<Point2D.Double> forwardVisionArea = new ArrayList<>(); 
@@ -443,7 +445,18 @@ public class Autopilot {
             nextSpeed = Math.max(targetSpeed, currentSpeed - vehicle.getType().getBrakeKmhPerTick());
         }
 
+        updateBrakeLights(currentSpeed, nextSpeed);
         vehicle.setSpeedKmh(nextSpeed);
+    }
+
+    private void updateBrakeLights(double currentSpeed, double nextSpeed) {
+        double brakeDelta = Math.max(0.0, currentSpeed - nextSpeed);
+        boolean stopped = nextSpeed < 0.1;
+        boolean braking = brakeDelta > BRAKE_LIGHT_EPSILON_KMH;
+        boolean hardBraking = brakeDelta >= vehicle.getType().getHardBrakeKmhPerTick() * 0.8;
+
+        vehicle.setLight(VehicleLight.BREAK, braking || stopped);
+        vehicle.setLight(VehicleLight.SLAMBRAKE, hardBraking);
     }
 
     private void updateRememberedTrafficLight(RoadManager roadManager, JunctionController junctionController, Lane currentLane, Point2D.Double frontPos) {
@@ -784,6 +797,7 @@ public class Autopilot {
     }
 
     private void beginLaneChangePath(List<Point2D.Double> newPath, Lane targetLane) {
+        updateLaneChangeLights(newPath);
         this.path = newPath;
         this.laneChangeTargetLane = targetLane;
         this.laneChangePathDistance = 0.0;
@@ -794,7 +808,27 @@ public class Autopilot {
         this.path = new ArrayList<>();
         this.laneChangeTargetLane = null;
         this.laneChangePathDistance = 0.0;
+        vehicle.clearLights(VehicleLight.LEFT, VehicleLight.RIGHT);
         updatePathArea();
+    }
+
+    private void updateLaneChangeLights(List<Point2D.Double> newPath) {
+        vehicle.clearLights(VehicleLight.LEFT, VehicleLight.RIGHT);
+        if (newPath == null || newPath.isEmpty()) return;
+
+        Point2D.Double targetPoint = newPath.get(newPath.size() - 1);
+        double rad = Math.toRadians(vehicle.getAngle());
+        double forwardX = Math.cos(rad);
+        double forwardY = Math.sin(rad);
+        double targetX = targetPoint.x - vehicle.getX();
+        double targetY = targetPoint.y - vehicle.getY();
+        double cross = forwardX * targetY - forwardY * targetX;
+
+        if (cross > 0.0) {
+            vehicle.setLight(VehicleLight.RIGHT, true);
+        } else if (cross < 0.0) {
+            vehicle.setLight(VehicleLight.LEFT, true);
+        }
     }
 
     private void beginOvertake(Vehicle targetVehicle, Lane referenceLane, Lane targetLane) {

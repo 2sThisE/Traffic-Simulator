@@ -1,6 +1,8 @@
 package com.trafficsimulator.debug;
 
 import java.awt.geom.Point2D;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
@@ -9,6 +11,7 @@ import com.trafficsimulator.road.Lane;
 import com.trafficsimulator.ui.RoadManager;
 import com.trafficsimulator.util.UnitConverter;
 import com.trafficsimulator.vehicle.DriverPersonality;
+import com.trafficsimulator.vehicle.VehicleLight;
 import com.trafficsimulator.vehicle.VehicleType;
 
 import javafx.scene.paint.Color;
@@ -28,6 +31,7 @@ public class Vehicle {
     private VehicleType type;     // 차량 종류
     private DriverPersonality driverPersonality;
     private boolean selected = false; // 선택 여부
+    private final EnumSet<VehicleLight> lights = EnumSet.noneOf(VehicleLight.class);
 
     private final Autopilot autopilot; // 차량의 주행 지능 ❤️
 
@@ -149,6 +153,17 @@ public class Vehicle {
     public DriverPersonality getDriverPersonality() { return driverPersonality; }
     public boolean isSelected() { return selected; }
     public void setSelected(boolean selected) { this.selected = selected; }
+    public Set<VehicleLight> getLights() { return Collections.unmodifiableSet(lights); }
+    public boolean hasLight(VehicleLight light) { return lights.contains(light); }
+    public void setLight(VehicleLight light, boolean on) {
+        if (on) lights.add(light);
+        else lights.remove(light);
+    }
+    public void clearLights(VehicleLight... targetLights) {
+        for (VehicleLight light : targetLights) {
+            lights.remove(light);
+        }
+    }
 
     // Autopilot 위임 Getter ❤️
     public List<Point2D.Double> getPath() { return autopilot.getPath(); }
