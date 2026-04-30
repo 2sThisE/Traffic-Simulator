@@ -72,42 +72,58 @@ public class Autopilot {
         }
 
         double ms = UnitConverter.kmhToMs(vehicle.getSpeedKmh());
-        double pixelPerTick = UnitConverter.toPixelPerTick(ms);
+        double remainingPixels = UnitConverter.toPixelPerTick(ms);
 
         if (isLaneChanging()) {
-            boolean reachedEnd = advanceAlongLaneChangePath(pixelPerTick);
-            if (reachedEnd) {
+            double leftover = advanceAlongLaneChangePath(remainingPixels);
+            if (leftover > 0.0) {
                 clearLaneChangePath();
+                remainingPixels = leftover;
+            } else {
+                return;
             }
-            return;
         }
 
-        if (currentConnection != null && path != null && path.size() >= 2) {
-            boolean reachedEnd = advanceAlongConnectionPath(pixelPerTick);
-            if (reachedEnd) {
-                if (logicalRoute != null && currentPhaseIndex < logicalRoute.size() - 1) {
-                    currentPhaseIndex++;
+        while (remainingPixels > 0.001 && !routeFinished) {
+            if (currentConnection != null && path != null && path.size() >= 2) {
+                double leftover = advanceAlongConnectionPath(remainingPixels);
+                if (leftover > 0.0) {
+                    if (logicalRoute != null && currentPhaseIndex < logicalRoute.size() - 1) {
+                        currentPhaseIndex++;
+                    }
+                    clearConnectionPath();
+                    remainingPixels = leftover;
+                } else {
+                    remainingPixels = 0.0;
                 }
-                clearConnectionPath();
+            } else {
+                if (logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) {
+                    moveStraight(remainingPixels);
+                    remainingPixels = 0.0;
+                    break;
+                }
+
+                Point2D.Double currentPos = new Point2D.Double(vehicle.getX(), vehicle.getY());
+                Lane currentLane = findNearestLane(logicalRoute.get(currentPhaseIndex), currentPos);
+                if (currentLane == null) {
+                    moveStraight(remainingPixels);
+                    remainingPixels = 0.0;
+                    break;
+                }
+
+                double leftover = advanceAlongLanePath(currentLane, currentPos, remainingPixels);
+                if (leftover > 0.0) {
+                    int prevPhaseIndex = currentPhaseIndex;
+                    beginConnectionToNextPhase(currentLane, junctionController);
+                    if (currentPhaseIndex == prevPhaseIndex && currentConnection == null) {
+                        remainingPixels = 0.0; // Nowhere else to go
+                    } else {
+                        remainingPixels = leftover;
+                    }
+                } else {
+                    remainingPixels = 0.0;
+                }
             }
-            return;
-        }
-
-        if (logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) {
-            moveStraight(pixelPerTick);
-            return;
-        }
-
-        Point2D.Double currentPos = new Point2D.Double(vehicle.getX(), vehicle.getY());
-        Lane currentLane = findNearestLane(logicalRoute.get(currentPhaseIndex), currentPos);
-        if (currentLane == null) {
-            moveStraight(pixelPerTick);
-            return;
-        }
-
-        boolean reachedEnd = advanceAlongLanePath(currentLane, currentPos, pixelPerTick);
-        if (reachedEnd) {
-            beginConnectionToNextPhase(currentLane, junctionController);
         }
     }
 
@@ -282,7 +298,7 @@ public class Autopilot {
         double maxSafetyDistSqForCheck = (detectionDistPx + UnitConverter.toPixel(40.0)) * (detectionDistPx + UnitConverter.toPixel(40.0));
         
         // 최적화: 루프 밖에서 공통 전방 경로 한 번만 추적
-        List<Point2D.Double> fullTraced = traceRoutePath(currentLane, frontPos, detectionDistPx, currentPhaseIndex, junctionController);
+        List<Point2D.Double> fullTraced = getForwardPath(frontPos, detectionDistPx, junctionController);
 
         if (fullTraced != null && fullTraced.size() >= 2) {
             for (Vehicle other : allVehicles) {
@@ -327,7 +343,7 @@ public class Autopilot {
         previousVehicleVisionDistancePx = currentVehicleVisionDistancePx;
         currentVehicleVisionDistancePx = adjustedSafetyDistPx;
 
-        List<Point2D.Double> tracedPath = traceRoutePath(currentLane, frontPos, Math.min(adjustedSafetyDistPx, safetyDistPx), currentPhaseIndex, junctionController);
+        List<Point2D.Double> tracedPath = getForwardPath(frontPos, Math.min(adjustedSafetyDistPx, safetyDistPx), junctionController);
         Area vehicleVision = new Area();
         if (tracedPath != null && tracedPath.size() >= 2) {
             addPathToArea(vehicleVision, tracedPath, halfWidth);
@@ -695,64 +711,87 @@ public class Autopilot {
         vehicle.setY(vehicle.getY() + Math.sin(rad) * pixelPerTick);
     }
 
-    private boolean advanceAlongLanePath(Lane lane, Point2D.Double currentPos, double pixelPerTick) {
+    private double advanceAlongLanePath(Lane lane, Point2D.Double currentPos, double pixelPerTick) {
         List<Point2D.Double> orderedPath = getOrderedLanePath(lane);
         if (orderedPath.size() < 2) {
             moveStraight(pixelPerTick);
-            return false;
+            return 0.0;
         }
 
         double currentDistance = getProjectionDistanceOnPath(orderedPath, currentPos);
         double pathLength = getPathLength(orderedPath);
-        double nextDistance = Math.min(pathLength, currentDistance + pixelPerTick);
+        
+        double nextDistance = currentDistance + pixelPerTick;
+        double leftover = 0.0;
+        if (nextDistance >= pathLength) {
+            leftover = nextDistance - pathLength;
+            nextDistance = pathLength;
+        }
+
         PointOnPath nextPoint = getPointAtDistance(orderedPath, nextDistance);
         if (nextPoint == null) {
             moveStraight(pixelPerTick);
-            return false;
+            return 0.0;
         }
 
         vehicle.setX(nextPoint.point.x);
         vehicle.setY(nextPoint.point.y);
         vehicle.setAngle(nextPoint.angleDeg);
-        return nextDistance >= pathLength - 0.1;
+        return leftover;
     }
 
-    private boolean advanceAlongLaneChangePath(double pixelPerTick) {
+    private double advanceAlongLaneChangePath(double pixelPerTick) {
         double pathLength = getPathLength(path);
         if (pathLength <= 0) {
-            return true;
+            return pixelPerTick;
         }
 
-        laneChangePathDistance = Math.min(pathLength, laneChangePathDistance + pixelPerTick);
+        double nextDistance = laneChangePathDistance + pixelPerTick;
+        double leftover = 0.0;
+        if (nextDistance >= pathLength) {
+            leftover = nextDistance - pathLength;
+            nextDistance = pathLength;
+        }
+        
+        laneChangePathDistance = nextDistance;
+
         PointOnPath nextPoint = getPointAtDistance(path, laneChangePathDistance);
         if (nextPoint == null) {
             moveStraight(pixelPerTick);
-            return false;
+            return 0.0;
         }
 
         vehicle.setX(nextPoint.point.x);
         vehicle.setY(nextPoint.point.y);
         vehicle.setAngle(nextPoint.angleDeg);
-        return laneChangePathDistance >= pathLength - 0.1;
+        return leftover;
     }
 
-    private boolean advanceAlongConnectionPath(double pixelPerTick) {
+    private double advanceAlongConnectionPath(double pixelPerTick) {
         double pathLength = getPathLength(path);
         if (pathLength <= 0) {
-            return true;
+            return pixelPerTick;
         }
 
-        connectionPathDistance = Math.min(pathLength, connectionPathDistance + pixelPerTick);
+        double nextDistance = connectionPathDistance + pixelPerTick;
+        double leftover = 0.0;
+        if (nextDistance >= pathLength) {
+            leftover = nextDistance - pathLength;
+            nextDistance = pathLength;
+        }
+        
+        connectionPathDistance = nextDistance;
+
         PointOnPath nextPoint = getPointAtDistance(path, connectionPathDistance);
         if (nextPoint == null) {
             moveStraight(pixelPerTick);
-            return false;
+            return 0.0;
         }
 
         vehicle.setX(nextPoint.point.x);
         vehicle.setY(nextPoint.point.y);
         vehicle.setAngle(nextPoint.angleDeg);
-        return connectionPathDistance >= pathLength - 0.1;
+        return leftover;
     }
 
     private void beginConnectionToNextPhase(Lane currentLane, JunctionController junctionController) {
@@ -918,21 +957,64 @@ public class Autopilot {
 
     private record PointOnPath(Point2D.Double point, double angleDeg) {}
 
-    private List<Point2D.Double> traceRoutePath(Lane startLane, Point2D.Double startPos, double totalDist, int startPhaseIdx, JunctionController junctionController) {
+    private List<Point2D.Double> getForwardPath(Point2D.Double startPos, double maxDist, JunctionController junctionController) {
         List<Point2D.Double> traced = new ArrayList<>();
-        double remainingDist = totalDist;
+        traced.add(startPos);
+        double remainingDist = maxDist;
+
+        if (isLaneChanging()) {
+            double startD = getProjectionDistanceOnPath(path, startPos);
+            List<Point2D.Double> sub = getPathSubListFromDistance(path, startD, remainingDist);
+            addPointsAvoidDuplicate(traced, sub);
+            remainingDist -= getPathLength(sub);
+            if (remainingDist <= 1.0) return traced;
+            
+            if (laneChangeTargetLane != null) {
+                int phaseIdx = findLaneRoutePhaseIndex(laneChangeTargetLane);
+                if (phaseIdx >= 0) {
+                    Point2D.Double nextStartPos = sub.isEmpty() ? startPos : sub.get(sub.size() - 1);
+                    traceLanesForward(traced, laneChangeTargetLane, nextStartPos, remainingDist, phaseIdx, junctionController);
+                }
+            }
+            return traced;
+        }
+
+        if (currentConnection != null) {
+            double startD = getProjectionDistanceOnPath(path, startPos);
+            List<Point2D.Double> sub = getPathSubListFromDistance(path, startD, remainingDist);
+            addPointsAvoidDuplicate(traced, sub);
+            remainingDist -= getPathLength(sub);
+            if (remainingDist <= 1.0) return traced;
+
+            if (currentPhaseIndex + 1 < logicalRoute.size()) {
+                Lane nextLane = currentConnection.targetLane();
+                Point2D.Double nextStartPos = sub.isEmpty() ? startPos : sub.get(sub.size() - 1);
+                traceLanesForward(traced, nextLane, nextStartPos, remainingDist, currentPhaseIndex + 1, junctionController);
+            }
+            return traced;
+        }
+
+        if (logicalRoute == null || logicalRoute.isEmpty() || currentPhaseIndex >= logicalRoute.size()) {
+            return traced;
+        }
+        
+        Set<Lane> currentPhase = logicalRoute.get(currentPhaseIndex);
+        Lane currentLane = findNearestLane(currentPhase, startPos);
+        if (currentLane != null) {
+            traceLanesForward(traced, currentLane, startPos, remainingDist, currentPhaseIndex, junctionController);
+        }
+        return traced;
+    }
+
+    private void traceLanesForward(List<Point2D.Double> traced, Lane startLane, Point2D.Double startPos, double remainingDist, int startPhaseIdx, JunctionController junctionController) {
         Lane currentLane = startLane;
         Point2D.Double currentPos = startPos;
-
         for (int p = startPhaseIdx; p < logicalRoute.size(); p++) {
             List<Point2D.Double> sub = getLaneSubPath(currentLane, currentPos, 0, remainingDist, junctionController);
             if (sub != null && !sub.isEmpty()) {
-                for (Point2D.Double pt : sub) {
-                    if (traced.isEmpty() || traced.get(traced.size() - 1).distanceSq(pt) > 0.1) traced.add(pt);
-                }
-                double segmentDist = 0;
-                for (int i = 0; i < sub.size() - 1; i++) segmentDist += sub.get(i).distance(sub.get(i + 1));
-                remainingDist -= segmentDist;
+                addPointsAvoidDuplicate(traced, sub);
+                remainingDist -= getPathLength(sub);
+                currentPos = sub.get(sub.size() - 1);
             }
             if (remainingDist <= 1.0) break;
 
@@ -949,14 +1031,10 @@ public class Autopilot {
                     }
                 }
                 if (nextConn != null) {
-                    List<Point2D.Double> connSub = getPathSubList(nextConn.connectionPath(), remainingDist);
+                    List<Point2D.Double> connSub = getPathSubListFromDistance(nextConn.connectionPath(), 0, remainingDist);
                     if (connSub != null && !connSub.isEmpty()) {
-                        for (Point2D.Double pt : connSub) {
-                            if (traced.isEmpty() || traced.get(traced.size() - 1).distanceSq(pt) > 0.1) traced.add(pt);
-                        }
-                        double cDist = 0;
-                        for (int i = 0; i < connSub.size() - 1; i++) cDist += connSub.get(i).distance(connSub.get(i + 1));
-                        remainingDist -= cDist;
+                        addPointsAvoidDuplicate(traced, connSub);
+                        remainingDist -= getPathLength(connSub);
                         currentLane = nextConn.targetLane();
                         currentPos = connSub.get(connSub.size() - 1);
                     } else break;
@@ -964,26 +1042,49 @@ public class Autopilot {
             } else break;
             if (remainingDist <= 1.0) break;
         }
-        return traced;
     }
 
-    private List<Point2D.Double> getPathSubList(List<Point2D.Double> fullPath, double maxDist) {
+    private void addPointsAvoidDuplicate(List<Point2D.Double> traced, List<Point2D.Double> newPoints) {
+        if (newPoints == null) return;
+        for (Point2D.Double pt : newPoints) {
+            if (traced.isEmpty() || traced.get(traced.size() - 1).distanceSq(pt) > 0.01) {
+                traced.add(pt);
+            }
+        }
+    }
+
+    private List<Point2D.Double> getPathSubListFromDistance(List<Point2D.Double> fullPath, double startDist, double maxDist) {
         if (fullPath == null || fullPath.isEmpty()) return null;
         List<Point2D.Double> sub = new ArrayList<>();
         double acc = 0;
-        sub.add(fullPath.get(0));
+        boolean started = false;
+        
         for (int i = 0; i < fullPath.size() - 1; i++) {
-            double d = fullPath.get(i).distance(fullPath.get(i + 1));
-            if (acc + d > maxDist) {
-                double ratio = (maxDist - acc) / d;
-                Point2D.Double p1 = fullPath.get(i);
-                Point2D.Double p2 = fullPath.get(i + 1);
+            Point2D.Double p1 = fullPath.get(i);
+            Point2D.Double p2 = fullPath.get(i + 1);
+            double d = p1.distance(p2);
+            
+            if (!started && acc + d >= startDist) {
+                double ratio = (startDist - acc) / d;
+                ratio = Math.max(0, Math.min(1, ratio));
                 sub.add(new Point2D.Double(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio));
-                break;
+                started = true;
             }
-            sub.add(fullPath.get(i + 1));
+            
+            if (started) {
+                if (acc + d >= startDist + maxDist) {
+                    double ratio = (startDist + maxDist - acc) / d;
+                    ratio = Math.max(0, Math.min(1, ratio));
+                    sub.add(new Point2D.Double(p1.x + (p2.x - p1.x) * ratio, p1.y + (p2.y - p1.y) * ratio));
+                    break;
+                } else {
+                    sub.add(p2);
+                }
+            }
             acc += d;
-            if (acc >= maxDist) break;
+        }
+        if (!started) {
+            sub.add(fullPath.get(fullPath.size() - 1));
         }
         return sub;
     }
