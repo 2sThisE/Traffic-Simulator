@@ -1,6 +1,8 @@
 package com.trafficsimulator.ui;
 
 import java.awt.geom.Point2D;
+import java.io.File;
+import java.io.IOException;
 import java.util.List;
 
 import com.trafficsimulator.debug.Vehicle;
@@ -17,6 +19,7 @@ import javafx.animation.AnimationTimer;
 import javafx.fxml.FXML;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.control.Button;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
@@ -24,6 +27,7 @@ import javafx.scene.input.MouseButton;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
+import javafx.stage.FileChooser;
 
 public class SimulatorController {
 
@@ -53,6 +57,8 @@ public class SimulatorController {
     private KeyboardHandler keyboardHandler;
     private CanvasTransformHandler transformHandler;
     private VehicleController vehicleController;
+    private ProjectSaveService projectSaveService;
+    private ProjectLoadService projectLoadService;
     private AnimationTimer renderTimer;
 
     private boolean isSimulationRunning = false; 
@@ -62,6 +68,7 @@ public class SimulatorController {
     private double cameraX = 0;
     private double cameraY = 0;
     private double zoomFactor = 1.0;
+    private File currentProjectFile;
     private RoadManager.PointHit hoveredPoint;
 
     @FXML
@@ -71,6 +78,8 @@ public class SimulatorController {
         junctionController = new JunctionController();
         trafficLightController = new TrafficLightController();
         vehicleController = new VehicleController(roadManager, junctionController);
+        projectSaveService = new ProjectSaveService();
+        projectLoadService = new ProjectLoadService();
         
         globalTimer = new GlobalTimer();
         globalTimer.addTickListener(trafficLightController);
@@ -128,6 +137,76 @@ public class SimulatorController {
         }
 
         requestRender(); 
+    }
+
+    @FXML
+    private void handleSaveProject() {
+        File targetFile = currentProjectFile;
+        if (targetFile == null) {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Save Traffic Simulator Project");
+            fileChooser.getExtensionFilters().add(
+                    new FileChooser.ExtensionFilter("Traffic Simulator Project (*.traffic.json)", "*.traffic.json")
+            );
+            fileChooser.setInitialFileName("traffic-project.traffic.json");
+            targetFile = fileChooser.showSaveDialog(rootPane.getScene().getWindow());
+        }
+        if (targetFile == null) return;
+
+        try {
+            projectSaveService.save(
+                    targetFile.toPath(),
+                    roadManager,
+                    junctionController,
+                    cameraX,
+                    cameraY,
+                    zoomFactor
+            );
+            currentProjectFile = targetFile;
+            statusLabel.setText("Saved: " + targetFile.getName());
+            statusLabel.setStyle("-fx-text-fill: #2ecc71;");
+        } catch (IOException ex) {
+            statusLabel.setText("Save failed");
+            statusLabel.setStyle("-fx-text-fill: #e74c3c;");
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle("Save Failed");
+            alert.setHeaderText("Could not save project.");
+            alert.setContentText(ex.getMessage());
+            alert.showAndWait();
+        }
+    }
+
+    @FXML
+    private void handleOpenProject() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Open Traffic Simulator Project");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Traffic Simulator Project (*.traffic.json)", "*.traffic.json")
+        );
+        File targetFile = fileChooser.showOpenDialog(rootPane.getScene().getWindow());
+        if (targetFile == null) return;
+
+        try {
+            if (isSimulationRunning) {
+                handleStopSimulation();
+            }
+            LoadedProject loadedProject = projectLoadService.load(targetFile.toPath(), roadManager, junctionController);
+            vehicleController.getVehicles().clear();
+            selectionManager.clearSelection();
+            currentProjectFile = targetFile;
+            transformHandler.setTransform(loadedProject.cameraX(), loadedProject.cameraY(), loadedProject.zoomFactor());
+            statusLabel.setText("Loaded: " + targetFile.getName());
+            statusLabel.setStyle("-fx-text-fill: #3498db;");
+            requestRender();
+        } catch (Exception ex) {
+            statusLabel.setText("Load failed");
+            statusLabel.setStyle("-fx-text-fill: #e74c3c;");
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle("Load Failed");
+            alert.setHeaderText("Could not load project.");
+            alert.setContentText(ex.getMessage());
+            alert.showAndWait();
+        }
     }
 
     @FXML

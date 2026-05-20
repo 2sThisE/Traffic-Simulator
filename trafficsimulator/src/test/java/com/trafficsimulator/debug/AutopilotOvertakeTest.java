@@ -1,6 +1,7 @@
 package com.trafficsimulator.debug;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.awt.geom.Point2D;
 import java.util.List;
@@ -18,6 +19,76 @@ import com.trafficsimulator.vehicle.DriverPersonality;
 import com.trafficsimulator.vehicle.VehicleType;
 
 class AutopilotOvertakeTest {
+
+    @Test
+    void testStoppedTrafficChangesToFreeAdjacentLane() {
+        RoadManager roadManager = new RoadManager();
+        JunctionController junctionController = new JunctionController();
+        Road road = new Road(
+                new Point2D.Double(0, 0),
+                new Point2D.Double(UnitConverter.toPixel(300.0), 0),
+                true
+        );
+        road.setLimitSpeed(60);
+        road.addLane(true, 0);
+        road.addLane(true, 1);
+        roadManager.addRoad(road);
+
+        Lane lane0 = road.getLane(0);
+        Lane lane1 = road.getLane(1);
+        List<Set<Lane>> route = List.of(Set.of(lane0, lane1));
+
+        Vehicle ego = new Vehicle(0, lane0.getLanePath().get(0).y, 0, VehicleType.NORMAL, DriverPersonality.AVERAGE);
+        ego.setLogicalRoute(route);
+        ego.setSpeedKmh(0.0);
+
+        Vehicle stoppedFront = new Vehicle(UnitConverter.toPixel(15.0), lane0.getLanePath().get(0).y, 0, VehicleType.NORMAL, DriverPersonality.MODEL);
+        stoppedFront.setLogicalRoute(route);
+        stoppedFront.setSpeedKmh(0.0);
+
+        List<Vehicle> vehicles = List.of(ego, stoppedFront);
+        ego.updateVisionArea(roadManager, junctionController, vehicles);
+        ego.updateDynamicPath(junctionController, vehicles);
+
+        assertFalse(ego.getPath().isEmpty(), "정체 상황에서 옆차선이 비어 있으면 차선 변경 경로를 만들어야 합니다.");
+    }
+
+    @Test
+    void testDoesNotChangeIntoLaneWithCrashedVehicleAhead() {
+        RoadManager roadManager = new RoadManager();
+        JunctionController junctionController = new JunctionController();
+        Road road = new Road(
+                new Point2D.Double(0, 0),
+                new Point2D.Double(UnitConverter.toPixel(300.0), 0),
+                true
+        );
+        road.setLimitSpeed(60);
+        road.addLane(true, 0);
+        road.addLane(true, 1);
+        roadManager.addRoad(road);
+
+        Lane lane0 = road.getLane(0);
+        Lane lane1 = road.getLane(1);
+        List<Set<Lane>> route = List.of(Set.of(lane0, lane1));
+
+        Vehicle ego = new Vehicle(0, lane0.getLanePath().get(0).y, 0, VehicleType.NORMAL, DriverPersonality.AVERAGE);
+        ego.setLogicalRoute(route);
+        ego.setSpeedKmh(60.0);
+
+        Vehicle stoppedFront = new Vehicle(UnitConverter.toPixel(20.0), lane0.getLanePath().get(0).y, 0, VehicleType.NORMAL, DriverPersonality.MODEL);
+        stoppedFront.setLogicalRoute(route);
+        stoppedFront.setSpeedKmh(0.0);
+
+        Vehicle crashedAhead = new Vehicle(UnitConverter.toPixel(70.0), lane1.getLanePath().get(0).y, 0, VehicleType.NORMAL, DriverPersonality.MODEL);
+        crashedAhead.setLogicalRoute(route);
+        crashedAhead.setCrashed();
+
+        List<Vehicle> vehicles = List.of(ego, stoppedFront, crashedAhead);
+        ego.updateVisionArea(roadManager, junctionController, vehicles);
+        ego.updateDynamicPath(junctionController, vehicles);
+
+        assertTrue(ego.getPath().isEmpty(), "목표 차선 전방 80m 안에 사고 차량이 있으면 차선 변경하지 않아야 합니다.");
+    }
 
     @Test
     void testIntelligentLaneChangeAndReturn() {

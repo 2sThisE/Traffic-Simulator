@@ -243,6 +243,8 @@ public class Road {
     public Point2D.Double getEndPoint() { return endPoint; }
     public Point2D.Double getControl1() { return control1; }
     public Point2D.Double getControl2() { return control2; }
+    public boolean isOneWay() { return oneWay; }
+    public boolean isCurved() { return isCurved; }
 
     // Getter들...
     public double getRoadLength() { return roadLength; }

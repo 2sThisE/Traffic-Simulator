@@ -42,6 +42,13 @@ public class Autopilot {
     private Lane overtakeLane = null;
     private static final double OVERTAKE_CLEARANCE_M = 8.0;
     private static final double OVERTAKE_SPEED_BOOST_KMH = 10.0;
+    private static final double LANE_CHANGE_LOOKAHEAD_SECONDS = 3.0;
+    private static final double LANE_CHANGE_MIN_LOOKAHEAD_M = 20.0;
+    private static final double LANE_CHANGE_FRONT_CLEARANCE_M = 12.0;
+    private static final double LANE_CHANGE_REAR_CLEARANCE_M = 8.0;
+    private static final double LANE_CHANGE_REAR_CLOSING_SECONDS = 2.5;
+    private static final double LANE_CHANGE_PATH_COLLISION_MARGIN_M = 0.3;
+    private static final double JAM_OVERTAKE_SCAN_M = 80.0;
     private static final double BRAKE_LIGHT_EPSILON_KMH = 0.05;
     
     // 시각적 렌더링을 위한 포인트 리스트 ❤️
@@ -1399,7 +1406,6 @@ public class Autopilot {
             routeTargetLane = (nearestLane != null) ? nearestLane : currentPhase.iterator().next();
         }
 
-        double rad = Math.toRadians(vehicle.getAngle());
         Lane currentLane = (nearestLane != null) ? nearestLane : routeTargetLane;
 
         if (isOvertaking()) {
@@ -1414,7 +1420,10 @@ public class Autopilot {
         }
         
         Lane stepTargetLane = currentLane;
-        double lookaheadDist = Math.max(30.0, vehicle.getSpeedKmh() * 3.0);
+        double lookaheadDist = UnitConverter.toPixel(Math.max(
+                LANE_CHANGE_MIN_LOOKAHEAD_M,
+                UnitConverter.kmhToMs(vehicle.getSpeedKmh()) * LANE_CHANGE_LOOKAHEAD_SECONDS
+        ));
         
         // [지능형 차선 변경 (추월) 판단] ❤️
         boolean needRouteChange = (currentLane != routeTargetLane);
@@ -1424,9 +1433,15 @@ public class Autopilot {
         double timeToReachFrontSec = UnitConverter.toMeter(currentVehicleVisionDistancePx) / Math.max(1.0, currentSpeedMs);
         double decisionTimeSec = 2.0 + (1.0 - vehicle.getDriverPersonality().getSafetyDistanceRatio()) * 5.0;
         
-        boolean isBlockedByFront = Double.isFinite(currentVehicleVisionDistancePx) && 
-                                   (timeToReachFrontSec <= decisionTimeSec || currentVehicleVisionDistancePx <= (desiredSafetyDistancePx * 2.0));
         Vehicle frontVehicle = (allVehicles == null) ? null : findFrontVehicleOnLane(currentLane, p0, allVehicles);
+        double frontVehicleGapPx = getFrontVehicleGapPx(currentLane, p0, frontVehicle);
+        boolean isBlockedByVision = Double.isFinite(currentVehicleVisionDistancePx)
+                && (timeToReachFrontSec <= decisionTimeSec || currentVehicleVisionDistancePx <= (desiredSafetyDistancePx * 2.0));
+        boolean isBlockedByActualFront = Double.isFinite(frontVehicleGapPx)
+                && (frontVehicleGapPx <= desiredSafetyDistancePx * 2.0
+                    || ((frontVehicle.isCrashed() || frontVehicle.getSpeedKmh() + 5.0 < vehicle.getSpeedKmh() || frontVehicle.getSpeedKmh() < 5.0)
+                        && frontVehicleGapPx <= UnitConverter.toPixel(JAM_OVERTAKE_SCAN_M)));
+        boolean isBlockedByFront = isBlockedByVision || isBlockedByActualFront;
 
         List<Lane> adjacentLanes = getAdjacentLanes(currentPhase, currentLane, p0);
         Lane primaryAdjacent = null;
@@ -1448,14 +1463,14 @@ public class Autopilot {
         boolean foundGap = false;
         
         if (primaryAdjacent != null && primaryAdjacent != currentLane) {
-            if (checkLaneGapSafe(primaryAdjacent, p0, lookaheadDist, junctionController)) {
+            if (checkLaneGapSafe(primaryAdjacent, p0, lookaheadDist, junctionController, allVehicles)) {
                 stepTargetLane = primaryAdjacent;
                 foundGap = true;
             }
         }
         
         if (!foundGap && isBlockedByFront && frontVehicle != null && secondaryAdjacent != null && secondaryAdjacent != currentLane) {
-            if (checkLaneGapSafe(secondaryAdjacent, p0, lookaheadDist, junctionController)) {
+            if (checkLaneGapSafe(secondaryAdjacent, p0, lookaheadDist, junctionController, allVehicles)) {
                 stepTargetLane = secondaryAdjacent;
             }
         }
@@ -1513,16 +1528,28 @@ public class Autopilot {
         }
 
         double dist = p0.distance(p3), weight = dist / 2.5;
-        Point2D.Double p1 = new Point2D.Double(p0.x + Math.cos(rad) * weight, p0.y + Math.sin(rad) * weight);
+        double rad = Math.toRadians(vehicle.getAngle());
         double len2 = Math.sqrt(p2_dir.x * p2_dir.x + p2_dir.y * p2_dir.y);
         if (len2 == 0) {
             clearLaneChangePath();
             return;
         }
-        Point2D.Double p2 = new Point2D.Double(p3.x - (p2_dir.x / len2) * weight, p3.y - (p2_dir.y / len2) * weight);
 
-        List<Point2D.Double> newPath = new ArrayList<>();
-        for (int i = 0; i <= 30; i++) newPath.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
+        List<Point2D.Double> newPath = buildLaneChangeBezierPath(p0, p3, p2_dir, len2, rad, weight);
+        if (frontVehicle != null && laneChangePathCollidesWithVehicle(newPath, frontVehicle)) {
+            double[] sharperWeightFactors = {0.65, 0.45, 0.30, 0.20};
+            for (double factor : sharperWeightFactors) {
+                List<Point2D.Double> sharperPath = buildLaneChangeBezierPath(p0, p3, p2_dir, len2, rad, weight * factor);
+                if (!laneChangePathCollidesWithVehicle(sharperPath, frontVehicle)) {
+                    newPath = sharperPath;
+                    break;
+                }
+            }
+            if (laneChangePathCollidesWithVehicle(newPath, frontVehicle)) {
+                clearLaneChangePath();
+                return;
+            }
+        }
         beginLaneChangePath(newPath, stepTargetLane);
         if (!needRouteChange && isBlockedByFront && frontVehicle != null) {
             beginOvertake(frontVehicle, currentLane, stepTargetLane);
@@ -1531,18 +1558,95 @@ public class Autopilot {
         updatePathArea(); // 궤적 영역 업데이트 ❤️
     }
 
-    private boolean checkLaneGapSafe(Lane targetLane, Point2D.Double p0, double lookaheadDist, JunctionController junctionController) {
-        if (lastSideVisionArea == null || lastSideVisionArea.isEmpty()) return false;
-        double minLookahead = UnitConverter.toPixel(15.0);
-        List<Point2D.Double> testPoints = getLaneSubPath(targetLane, p0, 0, Math.max(minLookahead, lookaheadDist), junctionController);
-        if (testPoints != null && testPoints.size() >= 2) {
-            Area testArea = new Area();
-            addPathToArea(testArea, testPoints, vehicle.getHeight() / 2.0 + UnitConverter.toPixel(0.5));
-            Area collisionCheck = new Area(testArea);
-            collisionCheck.subtract(lastSideVisionArea);
-            return collisionCheck.isEmpty();
+    private List<Point2D.Double> buildLaneChangeBezierPath(Point2D.Double p0,
+                                                           Point2D.Double p3,
+                                                           Point2D.Double targetDirection,
+                                                           double targetDirectionLength,
+                                                           double startAngleRad,
+                                                           double weight) {
+        Point2D.Double p1 = new Point2D.Double(
+                p0.x + Math.cos(startAngleRad) * weight,
+                p0.y + Math.sin(startAngleRad) * weight
+        );
+        Point2D.Double p2 = new Point2D.Double(
+                p3.x - (targetDirection.x / targetDirectionLength) * weight,
+                p3.y - (targetDirection.y / targetDirectionLength) * weight
+        );
+
+        List<Point2D.Double> newPath = new ArrayList<>();
+        for (int i = 0; i <= 30; i++) {
+            newPath.add(calculateCubicBezier(i / 30.0, p0, p1, p2, p3));
         }
-        return false;
+        return newPath;
+    }
+
+    private boolean laneChangePathCollidesWithVehicle(List<Point2D.Double> candidatePath, Vehicle obstacle) {
+        if (candidatePath == null || candidatePath.size() < 2 || obstacle == null) return false;
+
+        Area candidateArea = new Area();
+        addPathToArea(candidateArea, candidatePath, vehicle.getHeight() / 2.0 + UnitConverter.toPixel(LANE_CHANGE_PATH_COLLISION_MARGIN_M));
+        Area obstacleArea = new Area(obstacle.getShape());
+        candidateArea.intersect(obstacleArea);
+        return !candidateArea.isEmpty();
+    }
+
+    private boolean checkLaneGapSafe(Lane targetLane, Point2D.Double p0, double lookaheadDist, JunctionController junctionController, List<Vehicle> allVehicles) {
+        double minLookahead = UnitConverter.toPixel(LANE_CHANGE_MIN_LOOKAHEAD_M);
+        List<Point2D.Double> testPoints = getLaneSubPath(targetLane, p0, 0, Math.max(minLookahead, lookaheadDist), junctionController);
+        if (testPoints == null || testPoints.size() < 2) return false;
+        return isTargetLaneGapSafeByVehicles(targetLane, p0, Math.max(minLookahead, lookaheadDist), allVehicles);
+    }
+
+    private boolean isTargetLaneGapSafeByVehicles(Lane targetLane, Point2D.Double p0, double lookaheadDist, List<Vehicle> allVehicles) {
+        if (allVehicles == null) return true;
+
+        double myProjDist = getProjectionDistance(targetLane, p0);
+        if (myProjDist < 0) return false;
+
+        double laneWidthPx = UnitConverter.toPixel(3.5);
+        double maxLaneCenterDistSq = laneWidthPx * laneWidthPx / 4.0;
+        double ownHalfLength = vehicle.getWidth() / 2.0;
+        double frontClearancePx = Math.max(UnitConverter.toPixel(LANE_CHANGE_FRONT_CLEARANCE_M), lookaheadDist);
+        double egoSpeedMs = UnitConverter.kmhToMs(vehicle.getSpeedKmh());
+
+        for (Vehicle other : allVehicles) {
+            if (other == vehicle) continue;
+
+            Point2D.Double otherPos = new Point2D.Double(other.getX(), other.getY());
+            double[] projAndDistSq = getProjectionAndDistanceSq(targetLane, otherPos);
+            double otherProjDist = projAndDistSq[0];
+            if (otherProjDist < 0 || projAndDistSq[1] > maxLaneCenterDistSq) continue;
+
+            double otherHalfLength = other.getWidth() / 2.0;
+            double centerDelta = otherProjDist - myProjDist;
+            if (centerDelta >= 0.0) {
+                double frontGapPx = centerDelta - ownHalfLength - otherHalfLength;
+                if (frontGapPx < frontClearancePx
+                        || (other.isCrashed() && frontGapPx < UnitConverter.toPixel(JAM_OVERTAKE_SCAN_M))) {
+                    return false;
+                }
+            } else {
+                double rearGapPx = -centerDelta - ownHalfLength - otherHalfLength;
+                double rearClosingMs = Math.max(0.0, UnitConverter.kmhToMs(other.getSpeedKmh()) - egoSpeedMs);
+                double rearClearancePx = UnitConverter.toPixel(LANE_CHANGE_REAR_CLEARANCE_M + rearClosingMs * LANE_CHANGE_REAR_CLOSING_SECONDS);
+                if (rearGapPx < rearClearancePx) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private double getFrontVehicleGapPx(Lane lane, Point2D.Double p0, Vehicle frontVehicle) {
+        if (lane == null || frontVehicle == null) return Double.POSITIVE_INFINITY;
+
+        double myProjDist = getProjectionDistance(lane, p0);
+        Point2D.Double frontPos = new Point2D.Double(frontVehicle.getX(), frontVehicle.getY());
+        double frontProjDist = getProjectionDistance(lane, frontPos);
+        if (myProjDist < 0 || frontProjDist < 0) return Double.POSITIVE_INFINITY;
+
+        return frontProjDist - myProjDist - (vehicle.getWidth() + frontVehicle.getWidth()) / 2.0;
     }
 
     private Vehicle findFrontVehicleOnLane(Lane lane, Point2D.Double p0, List<Vehicle> allVehicles) {

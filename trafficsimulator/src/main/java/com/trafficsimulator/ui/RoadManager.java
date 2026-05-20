@@ -16,6 +16,12 @@ public class RoadManager {
     private final List<TrafficLight> trafficLightList = new ArrayList<>();
     private final List<Camera> cameraList = new ArrayList<>(); // 추가 ❤️
 
+    public void clear() {
+        roadList.clear();
+        trafficLightList.clear();
+        cameraList.clear();
+    }
+
     public void addRoad(Road road) {
         roadList.add(road);
     }

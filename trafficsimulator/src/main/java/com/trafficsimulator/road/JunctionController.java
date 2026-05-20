@@ -2,6 +2,7 @@ package com.trafficsimulator.road;
 
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -11,6 +12,10 @@ import java.util.Set;
 
 public class JunctionController {
     private Map<Lane, Set<LaneConnection>> connection=new HashMap<>();
+
+    public void clear() {
+        connection.clear();
+    }
 
     /**
      * 도로의 연결 정보를 추가 합니다.
@@ -96,6 +101,10 @@ public class JunctionController {
      * @return
      */
     public Set<LaneConnection> getConnectionList(Lane fromLane){return connection.get(fromLane);}
+
+    public Map<Lane, Set<LaneConnection>> getConnections() {
+        return Collections.unmodifiableMap(connection);
+    }
 
 
     /**

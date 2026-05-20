@@ -37,6 +37,10 @@ public class TrafficLight {
     public Set<Lane> getControlLaneList() { return controlLaneList; }
     public void removeControlLane(Lane lane) { controlLaneList.remove(lane); }
     public List<SignalSetting> getSignalTime() { return signalTime; } 
+    public int getTotalTick() { return totalTick; }
+    public int getCurrentTick() { return currentTick; }
+    public int getCurrentSignalIndex() { return currentSignalIndex; }
+    public int getNextPhaseTick() { return nextPhaseTick; }
 
     /**
      * 등록된 모든 차선의 정지선(나가는 방향) 중앙값으로 신호등의 위치를 업데이트합니다.

@@ -215,6 +215,14 @@ public class Vehicle {
     public void setY(double y) { this.y = y; }
     public double getAngle() { return angle; }
     public void setAngle(double angle) { this.angle = angle; }
+    public double getPreviousX() { return previousX; }
+    public double getPreviousY() { return previousY; }
+    public double getPreviousAngle() { return previousAngle; }
+    public void setPreviousTransform(double previousX, double previousY, double previousAngle) {
+        this.previousX = previousX;
+        this.previousY = previousY;
+        this.previousAngle = previousAngle;
+    }
     public double getInterpolatedX(double alpha) { return lerp(previousX, x, clamp01(alpha)); }
     public double getInterpolatedY(double alpha) { return lerp(previousY, y, clamp01(alpha)); }
     public double getInterpolatedAngle(double alpha) {
@@ -241,6 +249,14 @@ public class Vehicle {
     public void clearLights(VehicleLight... targetLights) {
         for (VehicleLight light : targetLights) {
             lights.remove(light);
+        }
+    }
+    public void clearAllLights() { lights.clear(); }
+    public void restoreCrashState(boolean crashed, int crashTickCounter) {
+        this.crashed = crashed;
+        this.crashTickCounter = crashTickCounter;
+        if (crashed) {
+            this.color = Color.RED;
         }
     }
 

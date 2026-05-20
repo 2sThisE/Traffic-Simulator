@@ -121,6 +121,7 @@ public class Camera {
 
     public Map<Lane, Point2D.Double> getTargetLaneMap() { return targetLaneMap; }
     public Point2D.Double getLoc() { return loc; }
+    public Road getRoad() { return road; }
     public void setLoc(Point2D.Double loc) { 
         // 외부(드래그 등)에서 위치를 강제로 설정할 때 사용 ❤️
         this.loc.setLocation(loc); 

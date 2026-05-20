@@ -35,11 +35,20 @@ public class CanvasTransformHandler {
         centerContainer.setOnScroll((ScrollEvent event) -> {
             // 이제 Ctrl 없이 휠만 돌려도 줌!
             double delta = event.getDeltaY();
+            double oldZoom = zoomFactor;
+            double mouseX = event.getX();
+            double mouseY = event.getY();
+            double worldX = (mouseX - cameraX) / oldZoom;
+            double worldY = (mouseY - cameraY) / oldZoom;
+
             if (delta > 0) {
                 zoomFactor = Math.min(MAX_ZOOM, zoomFactor * 1.1);
             } else {
                 zoomFactor = Math.max(MIN_ZOOM, zoomFactor / 1.1);
             }
+
+            cameraX = mouseX - worldX * zoomFactor;
+            cameraY = mouseY - worldY * zoomFactor;
             
             notifyListener();
             event.consume();
@@ -70,5 +79,12 @@ public class CanvasTransformHandler {
 
     private void notifyListener() {
         listener.onTransformChanged(cameraX, cameraY, zoomFactor);
+    }
+
+    public void setTransform(double cameraX, double cameraY, double zoomFactor) {
+        this.cameraX = cameraX;
+        this.cameraY = cameraY;
+        this.zoomFactor = zoomFactor;
+        notifyListener();
     }
 }

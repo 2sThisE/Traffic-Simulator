@@ -10,7 +10,7 @@ import com.trafficsimulator.vehicle.VehicleType;
 
 public class Lane {
     private boolean roadDirection; //도로 방향 t: 상행 f: 하행
-    private HashSet<LaneType> laneType;
+    private HashSet<LaneType> laneType = new HashSet<>();
     private List<Point2D.Double> lanePath = new ArrayList<>();
     private double laneLength;
     private Set<VehicleType> allowVehicle=new HashSet<>();
@@ -34,6 +34,7 @@ public class Lane {
      * @param vt
      */
     public void setAllowVehicle(VehicleType vt){allowVehicle.add(vt);}
+    public void clearAllowVehicle(){allowVehicle.clear();}
 
     /**
      * 통행가능한 차량에서 제외합니다
@@ -74,6 +75,7 @@ public class Lane {
     public void addLaneType(LaneType lType){
         laneType.add(lType);
     }
+    public void clearLaneTypes(){laneType.clear();}
 
     /**
      * 해당 래인이 인자값으로 받은 통행이 가능한지 확인합니다
@@ -82,6 +84,10 @@ public class Lane {
      */
     public boolean checkLaneType(LaneType lType){
         return laneType.contains(lType);
+    }
+
+    public Set<LaneType> getLaneType() {
+        return laneType;
     }
 
     /**
